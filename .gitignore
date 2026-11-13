@@ -1,0 +1,8 @@
+/.tools/
+/local/
+/build/
+__pycache__/
+# made from the APK launcher icon (Rockstar artwork)
+/recomp/res/lcs.ico
+# personal settings
+/lcs.ini
