@@ -1,50 +1,68 @@
-# Pipeline static recompilation
+# Static recompilation pipeline
 
-Seluruh `libGame.so`, `libopenal.so`, dan `libVendor_mpg123.so` diterjemahkan dari ARM64 ke C saat build, lalu dikompilasi clang ke x64. Tidak ada interpreter, JIT, atau Unicorn di executable. Status dan peta workspace ada di [../HANDOVER.md](../HANDOVER.md).
+At build time, `libGame.so`, `libopenal.so` and `libVendor_mpg123.so` are translated from ARM64 to C, and clang compiles that C for x64. The executable contains no interpreter, no JIT and no Unicorn. Status and the repository map are in [../HANDOVER.md](../HANDOVER.md).
 
 ## Build
 
 ```powershell
-python recomp/build.py            # lift -> ikat impor -> kompilasi paralel -> link
-python recomp/build.py --no-lift  # hanya runtime host yang berubah
+python recomp/build.py            # lift -> bind imports -> parallel compile -> link
+python recomp/build.py --no-lift  # only the host runtime changed
 ```
 
-Keluaran: `build/lcs.exe` (subsistem Windows, ikon dari APK), `build/lcs.map`, `build/lcs.pdb`.
+The output is `build/lcs.exe` (Windows subsystem, icon taken from the APK). The Visual Studio toolchain also writes `build/lcs.map` and `build/lcs.pdb`.
 
-## Berkas
-
-| Berkas | Peran |
+| Option | Default |
 | --- | --- |
-| `a64.py` | Semantik tiap instruksi ARM64 → pernyataan C. |
-| `lift.py` | Analisis ELF (simbol, FDE, PLT, relokasi), pembagian fungsi, emisi C per 32 KiB teks. |
-| `gen_gl.py` | Thunk konvensi pemanggilan AAPCS64 → GLES2 host. |
-| `build.py` | Orkestrasi build dan pengikatan impor antar-modul. |
-| `rt/recomp.h` | State CPU guest dan helper instruksi (dipakai kode hasil terjemahan). |
-| `rt/rt.h`, `rt/rt_core.c` | Pemetaan ELF, relokasi, `rt_call`, thunk host, diagnosis crash. |
-| `rt/rt_libc.c` | Bionic libc/libm/pthread di atas Win32. |
-| `rt/rt_android.c` | JNIEnv, kontrak metode Java, AAssetManager, ANativeWindow, EGL lewat SDL3. |
-| `rt/rt_audio.c` | Layanan OpenSL ES (buffer queue) di atas SDL3 audio. |
-| `rt/tweaks.c` | `lcs.ini` → variabel engine. Lihat [SETTINGS.md](SETTINGS.md). |
-| `rt/timing.c` | Koreksi batas bawah timer animasi untuk refresh rate di atas 100 Hz. |
-| `rt/frontend.c` | Presentasi menu utama/pause dan gambar kamera di kanan; aksi/submenu memakai game asli. |
-| `rt/radio_probe.c` | Diagnostik WAD musik → decoder MP3 asli (`--radio-probe`). |
-| `rt/main.c` | Peran `GameActivity`/`GameGlThread`: urutan JNI, input, loop frame. |
-| `res/lcs.rc` | Resource ikon; `lcs.ico` dibuat `tools/make_icon.py` dari APK. |
-| `tools/difftest.py` | Uji diferensial penerjemah terhadap Unicorn. |
-| `tools/test_timing.py` | Regresi timer asli pada 30/60/120/144/240 Hz, pause, dan mode khusus. |
-| `tools/extract_radio_wad.py` | Ekstrak hanya musik yang hilang dari OBB lokal menjadi paket terpisah. |
-| `tools/extract_apks.py`, `tools/bmp2png.py`, `tools/survey.py`, `tools/shapes.py`, `tools/relocs.py` | Ekstraksi APK dan alat analisis. |
+| `--libs` | `local/extracted/split_config.arm64_v8a/lib/arm64-v8a` |
+| `--out` | `build/recomp` |
+| `--exe` | `build/lcs.exe` |
+| `--llvm` | Visual Studio's LLVM; an llvm-mingw `bin` folder also works |
+| `--icon-res` | `local/extracted/base/res` |
 
-## Menambah impor host
+## Files
 
-Tulis `IMP(nama) { ... }` di salah satu `rt/*.c`. Argumen guest: `A(n)`/`P(n)`/`S(n)`/`I(n)` untuk x0–x7, `FA(n)`/`DA(n)` untuk v0–v7; hasil lewat `RET`, `RETI`, `RETF`, `RETD`. `build.py` menemukannya sendiri. Impor tanpa penyedia menjadi trap yang menyebut namanya saat dipanggil (`build/recomp/missing_imports.txt`).
+| File | Role |
+| --- | --- |
+| `a64.py` | Semantics of every ARM64 instruction → C statements |
+| `lift.py` | ELF analysis (symbols, FDEs, PLT, relocations), function splitting, C emission per 32 KiB of text, host hooks |
+| `gen_gl.py` | AAPCS64 → host GLES2 calling-convention thunks, plus the framebuffer-0 redirect |
+| `build.py` | Build orchestration and cross-module import binding |
+| `rt/recomp.h` | Guest CPU state and instruction helpers, used by the generated code |
+| `rt/rt.h`, `rt/rt_core.c` | ELF mapping, relocation, `rt_call`, host thunks, crash diagnostics |
+| `rt/rt_libc.c` | Bionic libc/libm/pthread on Win32 |
+| `rt/rt_android.c` | JNIEnv, Java method contracts, AAssetManager, ANativeWindow, EGL through SDL3 |
+| `rt/rt_audio.c` | OpenSL ES service (buffer queues) on SDL3 audio |
+| `rt/main.c` | Plays the role of `GameActivity`/`GameGlThread`: JNI order, input, frame loop, display modes, install layout |
+| `rt/present.c` | Scene framebuffer and letterboxed scaling into the window |
+| `rt/frontend.c` | Host-drawn main/pause/settings menu; actions and leaf pages use the original game |
+| `rt/tweaks.c` | `lcs.ini` → engine variables (see [SETTINGS.md](SETTINGS.md)) |
+| `rt/timing.c` | Frame-step fixes for high refresh rates |
+| `rt/radio_probe.c` | Music WAD → the game's MP3 decoder (`--radio-probe`) |
+| `installer/` | Data import tool and Inno Setup script |
+| `tools/make_icon.py` | `lcs.ico` from the APK launcher icons |
+| `tools/difftest.py` | Differential test of the translator against Unicorn |
+| `tools/test_timing.py` | Timer regression at 30/60/120/144/240 Hz |
+| `tools/extract_radio_wad.py` | Missing music from the old OBB → `data_music.wad` |
+| `tools/extract_apks.py`, `bmp2png.py`, `survey.py`, `shapes.py`, `relocs.py`, `xref.py` | APK extraction and analysis helpers |
 
-## Entry tak langsung
+## Adding a host import
 
-Jika game memanggil alamat yang belum dikenali sebagai awal fungsi, runtime berhenti dengan pesan dan mencatat alamatnya di `recomp/entries_<P>.txt`. Build ulang menambahkannya. Sampai gameplay awal, ini belum pernah terjadi.
+Write `IMP(name) { ... }` in one of the `rt/*.c` files; `build.py` finds it by itself.
 
-## Batas penerjemah
+| Macros | Use |
+| --- | --- |
+| `A(n)`, `P(n)`, `S(n)`, `I(n)` | Guest arguments in x0–x7 |
+| `FA(n)`, `DA(n)` | Guest arguments in v0–v7 |
+| `RET`, `RETI`, `RETF`, `RETD` | Return a value |
 
-- `throw` C++ berjalan sampai `std::terminate`; unwinding ke `catch` belum ada.
-- `setjmp` selalu mengembalikan 0 dan `longjmp` fatal.
-- Instruksi eksklusif (`ldaxr/stlxr`) diemulasi dengan compare-and-swap.
+An import with no provider becomes a trap that names itself when it is called; these are listed in `build/recomp/missing_imports.txt`.
+
+## Indirect entries
+
+The game may call an address that was not recognised as a function start. When that happens, the runtime stops with a message and records the address in `recomp/entries_<P>.txt`, and the next build includes it. So far this has not happened.
+
+## Translator limits
+
+- A C++ `throw` runs to `std::terminate`; there is no unwinding to a `catch` yet.
+- `setjmp` always returns 0, and `longjmp` is fatal.
+- Exclusive instructions (`ldaxr`/`stlxr`) are emulated with compare-and-swap.
