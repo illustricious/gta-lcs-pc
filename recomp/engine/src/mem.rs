@@ -20,3 +20,15 @@ pub unsafe fn r64(a: u64) -> u64 {
 pub unsafe fn rf32(a: u64) -> f32 {
     core::ptr::read_unaligned(a as *const f32)
 }
+#[inline]
+pub unsafe fn r32(a: u64) -> u32 {
+    core::ptr::read_unaligned(a as *const u32)
+}
+#[inline]
+pub unsafe fn rf64(a: u64) -> f64 {
+    core::ptr::read_unaligned(a as *const f64)
+}
+#[inline]
+pub unsafe fn w32f(a: u64, v: f32) {
+    core::ptr::write_unaligned(a as *mut f32, v)
+}

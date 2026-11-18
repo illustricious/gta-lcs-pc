@@ -11,7 +11,9 @@ static MISMATCHES: AtomicU64 = AtomicU64::new(0);
 #[derive(Clone, Copy)]
 pub enum Ret {
     X0,
+    W0,
     S0,
+    None,
 }
 
 #[inline]
@@ -49,11 +51,46 @@ pub unsafe fn port(c: *mut Cpu, original: unsafe extern "C" fn(*mut Cpu), ret: R
     f(&mut *c);
     let (ours, theirs) = match ret {
         Ret::X0 => ((*c).x[0], shadow.x[0]),
+        Ret::W0 => ((*c).x[0] as u32 as u64, shadow.x[0] as u32 as u64),
         Ret::S0 => ((*c).v[0][0] as u32 as u64, shadow.v[0][0] as u32 as u64),
+        Ret::None => (0, 0),
     };
     CALLS.fetch_add(1, Ordering::Relaxed);
     if ours != theirs {
         MISMATCHES.fetch_add(1, Ordering::Relaxed);
         rt_engine_mismatch(original as usize, ours, theirs);
+    }
+}
+
+/// Like [`port`], for functions that also write `len` bytes through the pointer in x`reg`. The memory is
+/// restored between the original and the port, then both results are compared.
+#[inline]
+pub unsafe fn port_mem(c: *mut Cpu, original: unsafe extern "C" fn(*mut Cpu), ret: Ret, reg: usize, len: usize, f: impl FnOnce(&mut Cpu)) {
+    if !enabled() {
+        f(&mut *c);
+        return;
+    }
+    let ptr = (*c).x[reg] as *mut u8;
+    let mut before = [0u8; 64];
+    let mut theirs = [0u8; 64];
+    let len = len.min(64);
+    core::ptr::copy_nonoverlapping(ptr, before.as_mut_ptr(), len);
+    let mut shadow: Cpu = *c;
+    original(&mut shadow);
+    core::ptr::copy_nonoverlapping(ptr, theirs.as_mut_ptr(), len);
+    core::ptr::copy_nonoverlapping(before.as_ptr(), ptr, len);
+    f(&mut *c);
+    CALLS.fetch_add(1, Ordering::Relaxed);
+    let mut differ = core::slice::from_raw_parts(ptr, len) != &theirs[..len];
+    let (ours, other) = match ret {
+        Ret::X0 => ((*c).x[0], shadow.x[0]),
+        Ret::W0 => ((*c).x[0] as u32 as u64, shadow.x[0] as u32 as u64),
+        Ret::S0 => ((*c).v[0][0] as u32 as u64, shadow.v[0][0] as u32 as u64),
+        Ret::None => (0, 0),
+    };
+    differ |= ours != other;
+    if differ {
+        MISMATCHES.fetch_add(1, Ordering::Relaxed);
+        rt_engine_mismatch(original as usize, ours, other);
     }
 }

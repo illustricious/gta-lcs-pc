@@ -27,7 +27,10 @@ from a64 import Translator, Unsupported, hx, split_top  # noqa: E402
 # Functions replaced by host code: the recompiled body becomes <entry>_orig.
 # 0x496d04..0x496e80: CSimpleModelInfo LOD queries, ported to Rust (recomp/engine/src/lod.rs).
 HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8,
-                    0x496d04, 0x496d20, 0x496d80, 0x496dc4, 0x496e2c, 0x496e80}}
+                    0x496d04, 0x496d20, 0x496d80, 0x496dc4, 0x496e2c, 0x496e80,
+                    0x4772fc,
+                    # CHud radar getters and CRadar helpers, ported to Rust (recomp/engine/src/hud.rs)
+                    0x48411c, 0x48416c, 0x4841c8, 0x484224, 0x35a400, 0x358b34, 0x358b98, 0x358bd8}}  # CFont::PrintString: text capture for host-drawn engine menu pages (rt/frontend.c)
 
 CHUNK = 0x8000  # bytes of guest text per generated C file
 TERMINATORS = {'b', 'ret', 'br', 'brk', 'udf', '.byte'}

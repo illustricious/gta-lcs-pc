@@ -139,3 +139,27 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
   The setting now scales only vehicle/ped distances, the small-object cull fade and `gFarClip`.
 - The pause pane no longer shows a copy of the last game frame (it flashed as a frozen snapshot);
   `pause_on_focus_loss` defaults to 0 (remote desktop / capture tools took focus and opened the menu).
+
+## Engine settings pages drawn by the host (18 Nov 2026)
+- AUDIO (5), DISPLAY (6), GAME SETTINGS (68) and LANGUAGE (7) are drawn with the host menu style, so every
+  SETTINGS page now looks the same. Rows come from `aScreens`. Values come from the engine:
+  - sliders: `GetCurrentLabelValueSlider` (brightness 0..512, volumes 0..127);
+  - all other value text: `CFont::PrintString` (0x4772fc, a host hook) records the strings while the native page
+    draw runs instead of drawing them, and the text printed right of each label becomes its value. Rows the game
+    does not print on this device (REFLECTIONS) are hidden.
+- Changes go through the engine with the row selected (`MENU+0xc`):
+  - sliders: `CheckSliderMovement(±1)`;
+  - on/off: `ProcessOnOffMenuOptions`, falling back to `ProcessMultiMenuOptions(dir)` when the value does not
+    change (targeting mode);
+  - multi-value options: `ProcessMultiMenuOptions(dir)`;
+  - languages: `ChangeLanguage(action - 18)` (0 English, 1 French, 2 German, ...);
+  - RESTORE DEFAULTS: the engine's own A press.
+- Leaving a page calls `CMenuManager::SaveSettings`, as the native Back does. SIGN OUT OF SOCIAL CLUB is hidden
+  (the session is offline).
+- Menu text is UTF-8 on the host side and converted back to UTF-16 when drawn, so French accents and Cyrillic show.
+- `LCS_DUMP_MENU=1` logs every row of every menu screen with its action, GXT key, values and target.
+
+## Radar in Rust (18 Nov 2026)
+- `radar_scale` (lcs.ini, Graphics → RADAR SIZE, 75-150%) and the bottom-left placement are applied by
+  `lcs_radar_layout()` in `recomp/engine/src/hud.rs`, which moves and resizes the HUD layout's radar widget.
+- The CHud radar getters and five CRadar helpers are Rust ports, shadow-verified against the originals.

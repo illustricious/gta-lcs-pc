@@ -24,8 +24,9 @@ typedef struct Settings {
     float radar_margin; /* extra distance from the bottom edge, in HUD lines (448 = screen height) */
     float draw_distance; /* 1.0 = the game's own distances, up to 3.0 */
     float res_scale;     /* internal resolution scale; 0 = the engine's own per-device value */
+    float radar_scale;   /* radar size factor (Rust CHud::GetRadarSize*) */
 } Settings;
-static Settings cfg = {1, 28.0f, 1.0f, 0.0f};
+static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f};
 static char ini_path[600];
 
 static const char *DEFAULT_INI =
@@ -45,6 +46,8 @@ static const char *DEFAULT_INI =
     "radar=bottom-left\n"
     "; extra radar distance from the bottom edge, in HUD lines (screen height = 448)\n"
     "radar_margin=28\n"
+    "; radar size: 0.75 .. 1.5\n"
+    "radar_scale=1.0\n"
     "\n"
     "; draw distance: 1.0 = original, up to 3.0 (vehicles, peds, small objects, far clip)\n"
     "draw_distance=2.0\n"
@@ -71,6 +74,7 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strcmp(line, "height")) plat.win_h = atoi(val);
     else if (!strcmp(line, "radar")) cfg.radar_bottom = !strcmp(val, "bottom-left");
     else if (!strcmp(line, "radar_margin")) cfg.radar_margin = (float)atof(val);
+    else if (!strcmp(line, "radar_scale")) cfg.radar_scale = (float)atof(val);
     else if (!strcmp(line, "draw_distance")) cfg.draw_distance = (float)atof(val);
     else if (!strcmp(line, "res_scale")) cfg.res_scale = (float)atof(val);
     else if (!strcmp(line, "fps_cap")) plat.fps_cap = atoi(val);
@@ -140,6 +144,11 @@ void tweaks_set_res_scale(float s) {
     char v[32]; snprintf(v, sizeof v, "%.2f", s); tweaks_save("res_scale", v);
 }
 int tweaks_radar_bottom(void) { return cfg.radar_bottom; }
+float tweaks_radar_scale(void) { return cfg.radar_scale; }
+void tweaks_set_radar_scale(float s) {
+    cfg.radar_scale = s < 0.5f ? 0.5f : s > 2.0f ? 2.0f : s;
+    char v[32]; snprintf(v, sizeof v, "%.2f", cfg.radar_scale); tweaks_save("radar_scale", v);
+}
 void tweaks_set_radar_bottom(int bottom) {
     cfg.radar_bottom = bottom;
     tweaks_save("radar", bottom ? "bottom-left" : "top-left");
@@ -147,26 +156,6 @@ void tweaks_set_radar_bottom(int bottom) {
 /* Fractions of the internal-resolution scale that the engine reports (first read of its own value). */
 float tweaks_engine_res_scale(void);
 
-static void radar_to_bottom(void) {
-    static float written_y = -1e9f, original_y;
-    uint64_t global = M64(GOT_HUD_LAYOUT);
-    if (!global) return;
-    uint64_t layout = M64(global);
-    if (!layout) return;
-    uint64_t widget = M64(layout + LAYOUT_RADAR_WIDGET);
-    if (!widget) return;
-    float y = MF32(widget + 0xc), h = MF32(widget + 0x14);
-    float sy = MF32(layout + LAYOUT_SCALE_Y), ss = MF32(layout + LAYOUT_SCALE_SIZE);
-    if (!(sy > 0) || !(ss > 0)) return;
-    if (y == written_y) return;
-    original_y = y; /* the engine (re)built its layout: mirror the top margin to the bottom edge */
-    /* HUD space is 448 lines tall (PS2 heritage): position = y * sy, size = h * ss in that space */
-    float top = original_y * sy, size = h * ss;
-    written_y = (448.0f - top - size - cfg.radar_margin) / sy;
-    MF32(widget + 0xc) = written_y;
-    if (rt_verbose) rt_log("tweak: radar y %.1f -> %.1f layout units (x %.1f, size %.1f x %.1f, scale %.3f/%.3f)\n", original_y,
-                           written_y, MF32(widget + 8), MF32(widget + 0x10), h, sy, ss);
-}
 
 /* Draw distance.  The engine keeps its source distances in exported DebugTweak floats (dv*,
  * value at +0x4c).  C_DeviceDetailSettings copies them into the working values it renders
@@ -333,7 +322,11 @@ static void teleport(CPU *c) {
 void tweaks_apply(CPU *c) {
     if (tweaks_teleport_pending) teleport(c);
     if (rt_verbose) timing_diag();
-    if (cfg.radar_bottom) radar_to_bottom();
+    {   /* radar position and size: Rust ports of the CHud radar getters (recomp/engine/src/hud.rs) */
+        void lcs_set_radar(int bottom, float margin, float scale);
+        lcs_set_radar(cfg.radar_bottom, cfg.radar_margin, cfg.radar_scale);
+        void lcs_radar_layout(void); lcs_radar_layout();
+    }
     scale_draw_distance();
     apply_res_scale();
     {   /* big-building LOD models are drawn farther (Rust port of CSimpleModelInfo, recomp/engine/src/lod.rs) */

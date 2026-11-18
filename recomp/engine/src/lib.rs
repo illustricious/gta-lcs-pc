@@ -11,6 +11,8 @@
 #![no_std]
 
 mod cpu;
+mod guest;
+mod hud;
 mod lod;
 mod mem;
 pub mod verify;

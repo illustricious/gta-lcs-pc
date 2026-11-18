@@ -45,7 +45,8 @@ static int root_menu(void) {
     if (s == 51 || s == 52 || s == 69) { root_ctx = s; return 1; }
     return 0;
 }
-static int game_page(void) { return menu_gate() && (MS32(MENU + SCREEN) == 2 || MS32(MENU + SCREEN) == 41); }
+static int engine_page(int s) { return s == 5 || s == 6 || s == 68 || s == 7; } /* Audio, Display, Game settings, Language */
+static int game_page(void) { int s = MS32(MENU + SCREEN); return menu_gate() && (s == 2 || s == 41 || engine_page(s)); }
 static int host_active(void) { return root_menu() || game_page(); }
 /* The engine may select the root page before dismissing its title/legal
  * screens. Only take input after that page has actually been rendered. */
@@ -56,14 +57,14 @@ static int input_root(void) { return host_active() && root_drawn && plat.frames-
  * the engine's own aScreens table and driven through the native selection + A button, so each action
  * (save, load, new game, ...) runs the original code. Help/Brief/Stats and the leaf settings pages
  * stay native. */
-enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET };
+enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE };
 typedef struct Row { const char *label; int kind; int arg; } Row;
-enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_COUNT };
+enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_COUNT };
 static const Row boot_rows[] = {{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row continue_rows[] = {{"CONTINUE",K_PAGE,14},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row pause_rows[] = {{"RESUME",K_RESUME,0},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"STATS",K_PAGE,1},{"BRIEF",K_PAGE,3},{"HELP",K_PAGE,62},{"EXIT GAME",K_PAGE,42}};
 static const Row settings_rows[] = {{"GRAPHICS",K_SUB,2},{"CONTROLS",K_SUB,3},{"GAMEPLAY",K_PAGE,68},{"AUDIO",K_PAGE,5},{"DISPLAY",K_PAGE,6},{"LANGUAGE",K_PAGE,7},{"BACK",K_BACK,0}};
-static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
+static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
 enum { C_LOOK = 20, C_SENS, C_MOUSE0 /* 22..24 */ };
 /* button ids match main.c: A B X Y START BACK L1 R1 UP DOWN LEFT RIGHT L3 R3 */
 static const char *button_names[14] = {"BUTTON A","BUTTON B","BUTTON X","BUTTON Y","START","SELECT","L1","R1","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","L3","R3"};
@@ -76,9 +77,11 @@ static const Row controls_rows[] = {
 #define CONTROLS_COUNT ((int)(sizeof controls_rows / sizeof controls_rows[0]))
 static int capture_btn = -1, scroll_top;
 #define VISIBLE_ROWS 8
+#define VALUE_X 196.0f /* value column, 640x448 menu space */
 static Row game_rows[12]; static char game_labels[12][40]; static int game_count, game_built;
 static int sub, resume_sub, keep_key = -1;
 static unsigned native_release;
+extern void host_native_button(int id, int down);
 
 /* Menu sounds: the engine's own front-end sounds, the same calls its menu code makes
  * (cDMAudio::PlayFrontEndSound: 0xc3 navigate/slider, 0xc4 select, 0xc5 back). Input arrives outside guest
@@ -122,6 +125,11 @@ static void adjust(int row, int dir) {
         int i = nearest(res_opts, 5, tweaks_res_scale()) + dir; if (i < 0) i = 0; if (i > 4) i = 4;
         tweaks_set_res_scale(res_opts[i]);
     } else if (row == S_RADAR) tweaks_set_radar_bottom(!tweaks_radar_bottom());
+    else if (row == S_RADAR_SIZE) {
+        static const float o[] = {0.75f, 0.85f, 1.0f, 1.15f, 1.3f, 1.5f};
+        int i = nearest(o, 6, tweaks_radar_scale()) + dir; if (i < 0) i = 0; if (i > 5) i = 5;
+        tweaks_set_radar_scale(o[i]);
+    }
     else if (row == S_MODE) host_set_display_mode((plat.display_mode + (dir > 0 ? 1 : 2)) % 3);
     else if (row == S_FOCUS) { plat.pause_on_focus_loss = !plat.pause_on_focus_loss; snprintf(v, sizeof v, "%d", plat.pause_on_focus_loss); tweaks_save("pause_on_focus_loss", v); }
     else if (row == C_LOOK) { plat.mouse_look = !plat.mouse_look; tweaks_save("mouse_look", plat.mouse_look ? "1" : "0"); }
@@ -140,6 +148,7 @@ static void value_text(int row, char *o, size_t n) {
     case S_DRAW: snprintf(o, n, "%.1fX", tweaks_draw_distance()); break;
     case S_RES: { float r = tweaks_res_scale(); if (r <= 0) snprintf(o, n, "AUTO"); else snprintf(o, n, "%dX%d", ((int)(plat.width*r+.5f))&~1, ((int)(plat.height*r+.5f))&~1); break; }
     case S_RADAR: snprintf(o, n, "%s", tweaks_radar_bottom() ? "BOTTOM" : "TOP"); break;
+    case S_RADAR_SIZE: snprintf(o, n, "%d%%", (int)(tweaks_radar_scale() * 100.0f + 0.5f)); break;
     case S_MODE: snprintf(o, n, "%s", plat.display_mode == 0 ? "WINDOWED" : plat.display_mode == 2 ? "EXCLUSIVE" : "BORDERLESS"); break;
     case S_FOCUS: snprintf(o, n, "%s", plat.pause_on_focus_loss ? "ON" : "OFF"); break;
     case C_LOOK: snprintf(o, n, "%s", plat.mouse_look ? "ON" : "OFF"); break;
@@ -156,24 +165,40 @@ static void bind_text(int btn, char *o, size_t n) {
     for (char *p = o; *p; p++) if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
 }
 
+/* Menu text is kept as UTF-8 on the host side and converted back to the engine's UTF-16 when drawn, so
+ * accented and Cyrillic labels survive. Upper case like the native menu (ASCII, Latin-1, Cyrillic). */
+static uint16_t upper16(uint16_t ch) {
+    if (ch >= 'a' && ch <= 'z') return (uint16_t)(ch - 32);
+    if (ch >= 0xe0 && ch <= 0xfe && ch != 0xf7) return (uint16_t)(ch - 32);
+    if (ch >= 0x430 && ch <= 0x44f) return (uint16_t)(ch - 32);
+    if (ch >= 0x450 && ch <= 0x45f) return (uint16_t)(ch - 80);
+    return ch;
+}
+static int put_utf8(char *o, int k, int n, uint16_t ch) {
+    if (ch < 0x80) { if (k + 1 < n) o[k++] = (char)ch; }
+    else if (ch < 0x800) { if (k + 2 < n) { o[k++] = (char)(0xc0 | (ch >> 6)); o[k++] = (char)(0x80 | (ch & 0x3f)); } }
+    else if (k + 3 < n) { o[k++] = (char)(0xe0 | (ch >> 12)); o[k++] = (char)(0x80 | ((ch >> 6) & 0x3f)); o[k++] = (char)(0x80 | (ch & 0x3f)); }
+    return k;
+}
+/* engine UTF-16 text (with ~x~ control codes) -> upper-case UTF-8 */
+static void wide_to_menu(uint64_t str, char *o, int n) {
+    int k = 0, skip = 0;
+    for (int i = 0; str && i < 120; i++) {
+        uint16_t ch = *(volatile uint16_t *)(str + 2 * i);
+        if (!ch) break;
+        if (ch == '~') { skip = !skip; continue; }
+        if (!skip) k = put_utf8(o, k, n, upper16(ch));
+    }
+    o[k < n ? k : n - 1] = 0;
+}
 static void call(CPU *c, unsigned va) { rt_invoke(c, G + va, 0); }
 /* Engine text (GXT) for a key stored in guest memory, flattened to upper-case ASCII. */
 static void gxt_label(CPU *c, uint64_t key, char *o, size_t n) {
     o[0] = 0;
     uint64_t obj = rt_invoke(c, G + 0x340ba0, 0);
     uint64_t str = obj ? rt_invoke(c, G + 0x4c3728, 2, obj, key) : 0;
-    size_t k = 0;
     if (!str || str < 0x100000) { snprintf(o, n, "%s", (const char *)key); return; }
-    int skip = 0;
-    for (int i = 0; i < 60 && k + 1 < n; i++) {
-        uint16_t ch = *(volatile uint16_t *)(str + 2 * i);
-        if (!ch) break;
-        if (ch == '~') { skip = !skip; continue; }
-        if (skip) continue;
-        if (ch >= 'a' && ch <= 'z') ch = (uint16_t)(ch - 32);
-        o[k++] = (ch >= 32 && ch < 127) ? (char)ch : '?';
-    }
-    o[k] = 0;
+    wide_to_menu(str, o, (int)n);
 }
 #define ASCREENS (G + 0x81c064)
 #define SCREEN_STRIDE 2252
@@ -199,9 +224,134 @@ static void build_game_rows(CPU *c) {
     game_rows[game_count++] = (Row){"BACK", K_BACK, 0};
     if (rt_verbose) { rt_log("frontend: game page rows:"); for (int i = 0; i < game_count; i++) rt_log(" [%s]", game_rows[i].label); rt_log("\n"); }
 }
+/* ---- engine settings pages (Audio 5, Display 6, Game settings 68, Language 7) drawn by the host ----------------
+ * Rows come from the engine's aScreens table. Values are the engine's own: sliders through
+ * GetCurrentLabelValueSlider, every other value text is recorded from the native page draw
+ * (CFont::PrintString is captured instead of drawn while it runs, see G_4772fc). Changes go through the
+ * engine's ProcessOnOffMenuOptions / ProcessMultiMenuOptions / CheckSliderMovement with the row selected. */
+static Row eng_rows[16]; static char eng_labels[16][96]; static int eng_count, eng_screen = -1, eng_compacted;
+static int eng_logged = -1;
+static char eng_value[16][96]; static float eng_slider[16]; static int eng_hidden[16];
+/* slider ranges of the engine: brightness 0..512, radio/SFX volume 0..127 */
+static float slider_max(int action) { return action == 11 ? 512.0f : 127.0f; }
+static int eng_action(int i) { return MS32(ASCREENS + (uint64_t)eng_screen * SCREEN_STRIDE + ENTRY_BASE + i * ENTRY_STRIDE - 4); }
+#define PREFS_LANGUAGE (G + 0x9ec910)
+#define PREFS_LANGUAGE_BY_USER (G + 0x9ec988)
+static void build_engine_rows(CPU *c) {
+    int s = MS32(MENU + SCREEN);
+    if (eng_screen == s) return;
+    eng_screen = s; eng_count = 0; eng_compacted = 0;
+    for (int i = 0; i < 15; i++) {
+        uint64_t e = ASCREENS + (uint64_t)s * SCREEN_STRIDE + ENTRY_BASE + i * ENTRY_STRIDE;
+        if (!M8(e)) break;
+        if (MS32(e - 4) == 2) { /* BACK, in the game language */
+            gxt_label(c, e, eng_labels[eng_count], sizeof eng_labels[0]);
+            eng_rows[eng_count] = (Row){eng_labels[eng_count], K_BACK, 0}; eng_count++; continue;
+        }
+        if (MS32(e - 4) == 119) continue; /* SIGN OUT OF SOCIAL CLUB: the session is always offline */
+        gxt_label(c, e, eng_labels[eng_count], sizeof eng_labels[0]);
+        eng_rows[eng_count] = (Row){eng_labels[eng_count], K_ENGINE, i};
+        eng_count++;
+    }
+}
+/* CFont::PrintString capture */
+static int font_capture, ncaps;
+static struct { float x, y; char s[96]; } caps[96];
+extern void G_4772fc_orig(CPU *c);
+void G_4772fc(CPU *c) {
+    if (!font_capture) { G_4772fc_orig(c); return; }
+    if (ncaps < 96) {
+        wide_to_menu(c->x[0], caps[ncaps].s, (int)sizeof caps[0].s);
+        caps[ncaps].x = c->v[0].f[0]; caps[ncaps].y = c->v[1].f[0];
+        ncaps++;
+    }
+}
+static void engine_values(CPU *c) {
+    CPU saved = *c;
+    for (int r = 0; r < eng_count; r++) {
+        eng_value[r][0] = 0; eng_slider[r] = -1; eng_hidden[r] = 0;
+        if (eng_rows[r].kind != K_ENGINE) continue;
+        int i = eng_rows[r].arg;
+        int li = -1; /* the value is printed on the label's line, to the right of it */
+        for (int k = 0; k < ncaps; k++) if (!strcmp(caps[k].s, eng_rows[r].label)) { li = k; break; }
+        if (li < 0 && ncaps) { eng_hidden[r] = 1; continue; } /* not shown by the game on this device */
+        if (eng_screen == 7) { if (MS32(PREFS_LANGUAGE) == eng_action(i) - 18) snprintf(eng_value[r], sizeof eng_value[0], "SELECTED"); continue; }
+        rt_invoke(c, G + 0x534560, 2, MENU, (uint64_t)i);
+        if (c->v[0].f[0] >= 0) { eng_slider[r] = c->v[0].f[0] / slider_max(MS32(ASCREENS + (uint64_t)eng_screen * SCREEN_STRIDE + ENTRY_BASE + i * ENTRY_STRIDE - 4)); continue; }
+        if (li < 0) continue;
+        for (int k = 0; k < ncaps; k++)
+            if (k != li && fabsf(caps[k].y - caps[li].y) < 6.0f && caps[k].x > caps[li].x && caps[k].s[0]) {
+                size_t n = strlen(eng_value[r]);
+                snprintf(eng_value[r] + n, sizeof eng_value[0] - n, "%s%s", n ? " " : "", caps[k].s);
+            }
+    }
+    if (!eng_compacted && ncaps) { /* drop rows the game hides on this device (e.g. REFLECTIONS) */
+        int w = 0;
+        for (int r = 0; r < eng_count; r++) {
+            if (eng_hidden[r]) continue;
+            if (w != r) {
+                memcpy(eng_labels[w], eng_labels[r], sizeof eng_labels[0]); eng_rows[w] = eng_rows[r];
+                eng_rows[w].label = eng_labels[w];
+                memcpy(eng_value[w], eng_value[r], sizeof eng_value[0]); eng_slider[w] = eng_slider[r];
+            }
+            w++;
+        }
+        eng_count = w; eng_compacted = 1;
+    }
+    if (rt_verbose && eng_logged != eng_screen) {
+        eng_logged = eng_screen;
+        for (int k = 0; k < ncaps; k++) rt_log("frontend: text %.1f,%.1f [%s]\n", caps[k].x, caps[k].y, caps[k].s);
+        for (int r = 0; r < eng_count; r++) rt_log("frontend: row %d [%s] value [%s] slider %.2f\n", r, eng_rows[r].label, eng_value[r], eng_slider[r]);
+        rt_log("frontend: language %d\n", MS32(PREFS_LANGUAGE));
+    }
+    *c = saved;
+}
+static void engine_adjust(CPU *c, int i, int dir) {
+    CPU saved = *c;
+    M32(MENU + 0xc) = i;
+    rt_invoke(c, G + 0x534560, 2, MENU, (uint64_t)i);
+    float slider = c->v[0].f[0];
+    int onoff = (int)rt_invoke(c, G + 0x53438c, 2, MENU, (uint64_t)i);
+    int action = eng_action(i);
+    if (action >= 18 && action <= 24) { /* language rows: CMenuManager::ChangeLanguage(action - 18): 0 English, 1 French, 2 German ... */
+        if (dir > 0) { M8(PREFS_LANGUAGE_BY_USER) = 1; rt_invoke(c, G + 0x526fdc, 2, MENU, (uint64_t)(action - 18)); eng_screen = -1; }
+    } else if (action == 102) { /* RESTORE DEFAULTS: the engine handles it on its own A press for this row */
+        if (dir > 0) { host_native_button(0, 1); native_release = plat.frames + 2; }
+    } else if (slider >= 0) { c->v[0].f[0] = (float)dir; rt_invoke(c, G + 0x532654, 1, MENU); }
+    else {
+        if (onoff >= 0) rt_invoke(c, G + 0x53204c, 1, MENU);
+        /* some on/off-looking options (targeting mode) only react to the multi handler */
+        if (onoff < 0 || (int)rt_invoke(c, G + 0x53438c, 2, MENU, (uint64_t)i) == onoff) rt_invoke(c, G + 0x5324fc, 2, MENU, (uint64_t)(int64_t)dir);
+    }
+    eng_logged = -1; /* log the values again after the change */
+    if (rt_verbose) { rt_invoke(c, G + 0x534560, 2, MENU, (uint64_t)i); rt_log("frontend: engine row %d dir %d: slider %.2f -> %.2f, onoff %d\n", i, dir, slider, c->v[0].f[0], onoff); }
+    *c = saved;
+}
+/* LCS_DUMP_MENU=1: log every row of the engine's menu table (action, GXT key and text, extra field, target). */
+static void dump_screens(CPU *c) {
+    static int done;
+    if (done || !getenv("LCS_DUMP_MENU")) return;
+    done = 1;
+    for (int s = 0; s < 72; s++) {
+        uint64_t base = ASCREENS + (uint64_t)s * SCREEN_STRIDE;
+        char title[64]; gxt_label(c, base, title, sizeof title);
+        rt_log("menu screen %d [%.8s] %s\n", s, (const char *)base, title);
+        for (int i = 0; i < 30; i++) {
+            uint64_t e = base + ENTRY_BASE + i * ENTRY_STRIDE;
+            if (!M8(e)) break;
+            char t[64]; gxt_label(c, e, t, sizeof t);
+            int keep = MS32(MENU + SCREEN); M32(MENU + SCREEN) = s;
+            int onoff = (int)rt_invoke(c, G + 0x53438c, 2, MENU, (uint64_t)i);
+            rt_invoke(c, G + 0x534560, 2, MENU, (uint64_t)i); float slider = c->v[0].f[0];
+            M32(MENU + SCREEN) = keep;
+            rt_log("   row %2d action %3d key %-8.8s extra %3d target %3d onoff %d slider %.2f  %s\n", i, MS32(e - 4), (const char *)e, MS32(e + 8), MS32(e + 12), onoff, slider, t);
+        }
+    }
+}
 static int cur_rows(const Row **out) {
     int s = MS32(MENU + SCREEN);
     if (s == 2) { *out = game_rows; return game_count; }
+    if (engine_page(s)) { *out = eng_rows; return eng_count; }
     if (s == 41 && sub == 3) { *out = controls_rows; return CONTROLS_COUNT; }
     if (s == 41 && sub == 2) { *out = graphics_rows; return (int)(sizeof graphics_rows / sizeof graphics_rows[0]); }
     if (s == 41) { *out = settings_rows; return 7; }
@@ -246,6 +396,12 @@ static void go_back(CPU *c) {
     if (capture_btn >= 0) capture_btn = -1;
     else if (sub) set_sub(0, sub == 2 ? 0 : 1);
     else if (MS32(MENU + SCREEN) == 41) { navigate(c, root_ctx); selection = 1; last_screen = -1; keep_key = view_key(); }
+    else if (engine_page(MS32(MENU + SCREEN))) { /* back to SETTINGS, on the row that opened this page */
+        int from = MS32(MENU + SCREEN);
+        { CPU keep = *c; rt_invoke(c, G + 0x527304, 1, MENU); *c = keep; } /* CMenuManager::SaveSettings, as the native Back does */
+        navigate(c, 41);
+        selection = from == 68 ? 2 : from == 5 ? 3 : from == 6 ? 4 : 5; last_screen = view_key(); keep_key = view_key();
+    }
     else if (MS32(MENU + SCREEN) == 2) native_back(c);
     ui_sound(SND_BACK);
 }
@@ -265,6 +421,7 @@ static void activate(CPU *c) {
         navigate(c, x->arg & 0xff);
         break;
     case K_BACK: go_back(c); break;
+    case K_ENGINE: engine_adjust(c, x->arg, 1); break;
     case K_BIND: capture_btn = x->arg; break;
     case K_RESET: {
         host_bind_reset(); char v[32], k[32];
@@ -287,14 +444,18 @@ int frontend_button(CPU *c, int b, int down) {
     if (!input_root()) return 0;
     if (b != 0 && b != 1 && b != 8 && b != 9 && b != 10 && b != 11) return 0;
     int s = MS32(MENU + SCREEN);
-    if (b == 1 && !sub && s != 2 && s != 41) { end_pause_map(c); return 0; } /* native Back still closes the pause menu */
+    if (b == 1 && !sub && s != 2 && s != 41 && !engine_page(s)) { end_pause_map(c); return 0; } /* native Back still closes the pause menu */
     consumed_buttons |= mask;
     sync_selection();
     if (s == 2) build_game_rows(c);
     const Row *r; int n = cur_rows(&r);
-    int is_value = selection < n && r[selection].kind == K_VALUE;
+    if (engine_page(s)) build_engine_rows(c);
+    int is_value = selection < n && (r[selection].kind == K_VALUE || r[selection].kind == K_ENGINE);
     if (b == 1) go_back(c);
-    else if (is_value && (b == 10 || b == 11)) { adjust(r[selection].arg, b == 11 ? 1 : -1); ui_sound(SND_ADJUST); }
+    else if (is_value && (b == 10 || b == 11)) {
+        if (r[selection].kind == K_ENGINE) engine_adjust(c, r[selection].arg, b == 11 ? 1 : -1); else adjust(r[selection].arg, b == 11 ? 1 : -1);
+        ui_sound(SND_ADJUST);
+    }
     else if (b == 8 || b == 10) { selection = (selection + n - 1) % n; ui_sound(SND_MOVE); }
     else if (b == 9 || b == 11) { selection = (selection + 1) % n; ui_sound(SND_MOVE); }
     else { ui_sound(SND_SELECT); activate(c); }
@@ -319,7 +480,7 @@ int frontend_title(void) {
     return (s == 51 || s == 52 || s == 69) && M8(G + 0x9ec7aa); /* renderedTapToContinue */
 }
 int frontend_back(CPU *c) {
-    if (input_root() && (sub || MS32(MENU + SCREEN) == 2 || MS32(MENU + SCREEN) == 41)) { sync_selection(); go_back(c); return 1; }
+    if (input_root() && (sub || MS32(MENU + SCREEN) == 2 || MS32(MENU + SCREEN) == 41 || engine_page(MS32(MENU + SCREEN)))) { sync_selection(); go_back(c); return 1; }
     if (map_active && !input_root()) end_pause_map(c);
     else if (map_active && root_ctx == 52) end_pause_map(c);
     return 0;
@@ -390,8 +551,14 @@ static void hgradient(CPU *c, float x, float y, float w, float h, unsigned left,
 }
 static void drop_color(CPU *c, unsigned rgba) { rt_invoke(c, G + 0x4786cc, 1, (uint64_t)&rgba); }
 static void text(CPU *c, const char *s, float x, float y, float scale, unsigned color) {
-    uint16_t wide[160]; unsigned n = 0;
-    while (*s && n < 159) wide[n++] = (unsigned char)*s++;
+    uint16_t wide[160]; unsigned n = 0; /* UTF-8 -> UTF-16 */
+    const unsigned char *u = (const unsigned char *)s;
+    while (*u && n < 159) {
+        if (*u < 0x80) wide[n++] = *u++;
+        else if ((*u & 0xe0) == 0xc0 && u[1]) { wide[n++] = (uint16_t)(((u[0] & 0x1f) << 6) | (u[1] & 0x3f)); u += 2; }
+        else if ((*u & 0xf0) == 0xe0 && u[1] && u[2]) { wide[n++] = (uint16_t)(((u[0] & 0x0f) << 12) | ((u[1] & 0x3f) << 6) | (u[2] & 0x3f)); u += 3; }
+        else u++;
+    }
     wide[n] = 0;
     rt_invoke(c, G + 0x47551c, 1, (uint64_t)&color);
     c->v[0].f[0] = scale; c->v[1].f[0] = scale * 1.48f;
@@ -451,7 +618,9 @@ void G_527bf4(CPU *c) {
     /* The native draw also advances frontend fades, retires the splash and
      * initialises text/UI state. Keep those side effects before repainting
      * the layout; native submenus depend on them. */
+    font_capture = engine_page(MS32(MENU + SCREEN)); ncaps = 0; /* engine pages: record their text, draw it ourselves */
     G_527bf4_orig(c);
+    font_capture = 0;
     *c = saved;
     root_drawn = 1;
     if (!first_menu_frame) first_menu_frame = plat.frames;
@@ -460,6 +629,9 @@ void G_527bf4(CPU *c) {
     if (resume_sub && root_menu()) { set_sub(resume_sub, 0); resume_sub = 0; }
     sync_selection();
     if (screen == 2) build_game_rows(c);
+    if (engine_page(screen)) { build_engine_rows(c); engine_values(c); }
+    else eng_screen = -1;
+    dump_screens(c);
     static int logged_page = -1;
     if (rt_verbose && logged_page != screen) { logged_page = screen; rt_log("frontend: draw page=%d frame=%u native option=%d\n", logged_page, plat.frames, MS32(MENU+0xc)); }
     call(c, 0x5339ec); /* original frontend render states */
@@ -487,7 +659,7 @@ void G_527bf4(CPU *c) {
         sprite(c, M64(MENU + 0x180), (21.0f + (PANEL - 18.0f)) * 0.5f - lw * 0.5f, 22, lw, lh, 0xffffffff); /* centred over the rows */
     }
     const Row *items; int count = cur_rows(&items);
-    int has_value = selection < count && items[selection].kind == K_VALUE;
+    int has_value = selection < count && (items[selection].kind == K_VALUE || items[selection].kind == K_ENGINE);
     int is_bind = selection < count && items[selection].kind == K_BIND;
     int last = scroll_top + VISIBLE_ROWS < count ? scroll_top + VISIBLE_ROWS : count;
     for (int i = scroll_top; i < last; i++) {
@@ -506,16 +678,22 @@ void G_527bf4(CPU *c) {
         if (i == selection) drop_color(c, 0xff000000);
         char val[48] = "", shown[64];
         if (items[i].kind == K_VALUE) { value_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, i == selection ? "< %s >" : "%s", val); }
+        else if (items[i].kind == K_ENGINE && eng_slider[i] >= 0) { /* engine slider: a bar in the value column */
+            float f = eng_slider[i] > 1 ? 1 : eng_slider[i];
+            rect(c, VALUE_X, y + 7, 80, 7, 0xff3a3a3a); rect(c, VALUE_X, y + 7, 80 * f, 7, i == selection ? 0xff000099 : 0xffd2d2d2);
+            shown[0] = 0;
+        }
+        else if (items[i].kind == K_ENGINE && eng_value[i][0]) snprintf(shown, sizeof shown, i == selection ? "< %s >" : "%s", eng_value[i]);
         else if (items[i].kind == K_BIND) { bind_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, "%s", val); }
         else shown[0] = 0;
-        if (shown[0]) text(c, shown, 172, ty, .46f, (i == selection || (items[i].kind == K_BIND && capture_btn == items[i].arg)) ? 0xff2424a7 : 0xffd2d2d2);
+        if (shown[0]) text(c, shown, VALUE_X, ty, .46f, (i == selection || (items[i].kind == K_BIND && capture_btn == items[i].arg)) ? 0xff2424a7 : 0xffd2d2d2);
     }
     if (count > VISIBLE_ROWS) { /* scroll bar */
         float top = row_top(), span = VISIBLE_ROWS * row_step() - 5;
         rect(c, PANEL - 14, top, 3, span, 0xff2e2e2e);
         rect(c, PANEL - 14, top + span * scroll_top / count, 3, span * VISIBLE_ROWS / count, 0xff000099);
     }
-    int can_back = sub || screen == 2 || screen == 41;
+    int can_back = sub || screen == 2 || screen == 41 || engine_page(screen);
     float fy = 426.0f - 15.0f * (can_back ? 2 : 1);
     int pad = plat.pad_input; /* hints follow the device that was used last */
     if (capture_btn >= 0) { text(c, "PRESS A KEY   ESC CANCEL", 26, fy, .40f, 0xffbfbfbf); fy += 15; }

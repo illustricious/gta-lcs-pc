@@ -27,6 +27,26 @@ Set `LCS_RS_VERIFY=1` to check the ports.
 | `CSimpleModelInfo::GetLastElement()` | 0x496dc4 | ✓ |
 | `CSimpleModelInfo::GetLastElement(float)` | 0x496e2c | ✓ |
 | `CSimpleModelInfo::GetNearDistance()` | 0x496e80 | ✓ |
+| `CHud::GetRadarPosX()` | 0x48411c | ✓ |
+| `CHud::GetRadarPosY()` | 0x48416c | ✓ |
+| `CHud::GetRadarSizeX()` | 0x4841c8 | ✓ |
+| `CHud::GetRadarSizeY()` | 0x484224 | ✓ |
+| `CRadar::AdjustForWideScreen(float)` | 0x35a400 | ✓ |
+| `CRadar::TransformRealWorldPointToRadarSpace` | 0x358b34 | ✓ |
+| `CRadar::LimitRadarPoint(CVector2D&)` | 0x358b98 | ✓ |
+| `CRadar::CalculateBlipAlpha(float)` | 0x358bd8 | ✓ |
+
+Functions that write through a pointer are verified with `verify::port_mem`. The memory is restored between the original and the port, and both the memory and the return register are compared.
+
+Ports call other guest functions through `guest::call`, which saves and restores the CPU. ARM64 `fmadd`/`fmsub` map to `guest::fma`, a single-rounding FMA identical to the `fmaf` used by the recompiled C. `fsqrt` maps to `guest::sqrt`.
+
+The second verification run, after the HUD ports, covered over 1,000,000 calls with 0 mismatches.
+
+## Radar placement (`hud.rs`)
+
+`lcs_radar_layout()` runs once per frame. It moves the HUD layout's radar widget to the bottom-left corner (`radar`, `radar_margin`) and scales it (`radar_scale`, Graphics → RADAR SIZE). Because everything reads that widget, the ring sprite, the map, the blips and the getters all follow.
+
+When the engine rebuilds its layout, the original values are recorded again. This replaces the old C code that rewrote only the widget's y.
 
 The verification run covered more than 1,000,000 calls in gameplay with 0 mismatches (18 Nov 2026).
 

@@ -9,5 +9,7 @@ void tweaks_set_draw_distance(float k);
 float tweaks_res_scale(void);
 void tweaks_set_res_scale(float s);
 int tweaks_radar_bottom(void);
+float tweaks_radar_scale(void);
+void tweaks_set_radar_scale(float s);
 void tweaks_set_radar_bottom(int bottom);
 void tweaks_save(const char *key, const char *value);
