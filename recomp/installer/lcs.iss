@@ -53,6 +53,8 @@ Source: "{#Root}\recomp\lift.py"; DestDir: "{app}\src\recomp"; Flags: ignorevers
 Source: "{#Root}\recomp\a64.py"; DestDir: "{app}\src\recomp"; Flags: ignoreversion
 Source: "{#Root}\recomp\gen_gl.py"; DestDir: "{app}\src\recomp"; Flags: ignoreversion
 Source: "{#Root}\recomp\tools\make_icon.py"; DestDir: "{app}\src\recomp\tools"; Flags: ignoreversion
+; Rust engine ports, prebuilt for llvm-mingw (recomp/engine)
+Source: "{#Root}\recomp\engine\prebuilt\x86_64-pc-windows-gnu\liblcs_engine.a"; DestDir: "{app}\src\recomp\engine\prebuilt\x86_64-pc-windows-gnu"; Flags: ignoreversion
 Source: "{#Root}\recomp\rt\*.c"; DestDir: "{app}\src\recomp\rt"; Flags: ignoreversion
 Source: "{#Root}\recomp\rt\*.h"; DestDir: "{app}\src\recomp\rt"; Flags: ignoreversion
 Source: "{#Sdl}\include\*"; DestDir: "{app}\src\.tools\sdl3\SDL3-3.4.18\include"; Flags: ignoreversion recursesubdirs

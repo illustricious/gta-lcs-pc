@@ -275,6 +275,17 @@ static void timing_diag(void) {
             for (unsigned i = 0; i < 5; i++) { uint64_t a2 = rt_sym(w[i]); if (a2) n += snprintf(line + n, sizeof line - n, " %s=%.2f", w[i] + (w[i][0]==95 ? 8 : 0), MF32(a2 + (i >= 3 ? DV_VALUE : 0))); }
             rt_log("diag: dist%s\n", line);
         }
+        {   /* render list: visible entities, and how many of them are big-building LOD models (flag 0x10) */
+            int n = MS32(G_BASE + 0x85ad6c), big = 0;
+            uint64_t infos = M64(M64(G_BASE + 0x7f8fb0)); int ninfos = MS32(M64(G_BASE + 0x7f8fa0));
+            for (int i = 0; i < n && i < 4000; i++) {
+                uint64_t e = M64(G_BASE + 0x85ad80 + 8ull * i);
+                int16_t mi = e ? MS16(e + 0x7c) : -1;
+                uint64_t info = mi >= 0 && mi < ninfos ? M64(infos + 8ull * mi) : 0;
+                if (info && (M16(info + 0x56) & 0x10)) big++;
+            }
+            rt_log("diag: render list %d entities, %d big-building LODs\n", n, big);
+        }
         {
             static int dumped;
             if (!dumped++) {
@@ -301,10 +312,34 @@ static void timing_diag(void) {
     t0 = now; clock0 = clk;
 }
 
+/* --teleport X Y Z HEADING (tests): CPed::Teleport on the player once the game clock has run 1.5 s.
+ * HEADING is accepted but not applied yet (calling CPlaceable::SetHeading from here crashed CWorld::Process). */
+float tweaks_teleport[4];
+int tweaks_teleport_pending;
+static void teleport(CPU *c) {
+    uint64_t base = rt_sym("_ZN6CWorld7PlayersE");
+    uint64_t ped = base ? M64(base) : 0;
+    if (!ped || M32(M64(G_BASE + 0x7f9208)) < 1500) return;
+    CPU keep = *c;
+    static float pos[3]; /* CPed::Teleport(CVector const &): guest pointers are host pointers */
+    pos[0] = tweaks_teleport[0]; pos[1] = tweaks_teleport[1]; pos[2] = tweaks_teleport[2];
+    c->x[0] = ped; c->x[1] = (uint64_t)pos;
+    rt_call(c, G_BASE + 0x4324e8);
+    *c = keep;
+    tweaks_teleport_pending = 0;
+    rt_log("diag: teleported to %.1f %.1f %.1f heading %.2f\n", tweaks_teleport[0], tweaks_teleport[1], tweaks_teleport[2], tweaks_teleport[3]);
+}
+
 void tweaks_apply(CPU *c) {
-    (void)c;
+    if (tweaks_teleport_pending) teleport(c);
     if (rt_verbose) timing_diag();
     if (cfg.radar_bottom) radar_to_bottom();
     scale_draw_distance();
     apply_res_scale();
+    {   /* big-building LOD models are drawn farther (Rust port of CSimpleModelInfo, recomp/engine/src/lod.rs) */
+        void engine_set_far_lod_scale(float k); void engine_report(void);
+        float k = cfg.draw_distance < 1.0f ? 1.0f : cfg.draw_distance > 3.0f ? 3.0f : cfg.draw_distance;
+        engine_set_far_lod_scale(k);
+        engine_report();
+    }
 }

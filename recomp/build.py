@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -152,11 +153,30 @@ def compile_all(jobs, opt):
     return objs, bool(todo)
 
 
+def engine_lib():
+    """Build the Rust engine crate (recomp/engine) for the toolchain in use. Without cargo (the installer),
+    a prebuilt library from recomp/engine/prebuilt/<target>/ is used."""
+    target = 'x86_64-pc-windows-gnu' if mingw() else 'x86_64-pc-windows-msvc'
+    name = 'liblcs_engine.a' if mingw() else 'lcs_engine.lib'
+    crate = ROOT / 'recomp' / 'engine'
+    cargo = shutil.which('cargo')
+    if cargo and (crate / 'Cargo.toml').exists():
+        run([cargo, 'build', '--release', '--quiet', '--target', target, '--manifest-path', str(crate / 'Cargo.toml'),
+             '--target-dir', str(OUT / 'engine')])
+        return OUT / 'engine' / target / 'release' / name
+    lib = crate / 'prebuilt' / target / name
+    if not lib.exists():
+        sys.exit('cargo not found and no prebuilt engine library at %s' % lib)
+    return lib
+
+
 def link(objs, relink):
     exe = EXE
     exe.parent.mkdir(parents=True, exist_ok=True)
+    engine = engine_lib()
     rc_dir = ROOT / 'recomp' / 'res'
     newest_res = max((f.stat().st_mtime for f in rc_dir.iterdir()), default=0) if rc_dir.exists() else 0
+    newest_res = max(newest_res, engine.stat().st_mtime)
     if not relink and exe.exists() and exe.stat().st_mtime > newest_res:
         return exe
     res = []
@@ -175,7 +195,7 @@ def link(objs, relink):
             run([str(LLVM / 'llvm-rc.exe'), '/fo', str(resobj), str(rc)])
         res = [str(resobj)]
     rsp = OUT / 'link.rsp'
-    rsp.write_text('\n'.join('"%s"' % str(o).replace('\\', '/') for o in objs))
+    rsp.write_text('\n'.join('"%s"' % str(o).replace('\\', '/') for o in list(objs) + [engine]))
     if mingw():
         run([str(LLVM / 'clang.exe'), '-fuse-ld=lld', '-o', str(exe), '@' + str(rsp),
              '-L', str(SDL / 'lib' / 'x64'), '-lSDL3', '-lbcrypt', '-lsynchronization', '-lws2_32', '-lwinmm', '-luser32', '-lshell32',

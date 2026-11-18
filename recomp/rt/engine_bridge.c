@@ -1,0 +1,36 @@
+/* Host side of the Rust engine crate (recomp/engine): layout check, settings, verification log. */
+#include "rt.h"
+#include "platform.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+/* recomp/engine/src/cpu.rs mirrors struct CPU */
+_Static_assert(sizeof(CPU) == 1336, "struct CPU changed: update recomp/engine/src/cpu.rs");
+
+void lcs_set_far_lod_scale(float scale);
+void lcs_engine_verify(int on);
+void lcs_engine_verify_counts(uint64_t *out);
+
+__declspec(noreturn) void rt_engine_panic(void) { rt_fatal("Rust engine panic"); }
+
+void rt_engine_mismatch(uintptr_t original, uint64_t ours, uint64_t theirs) {
+    static int shown;
+    if (shown++ < 20) rt_log("engine: MISMATCH in %p: rust %llx, original %llx\n", (void *)original,
+                             (unsigned long long)ours, (unsigned long long)theirs);
+}
+
+void engine_init(void) {
+    const char *v = getenv("LCS_RS_VERIFY");
+    if (v && *v == '1') { lcs_engine_verify(1); rt_log("engine: verifying Rust ports against the originals\n"); }
+}
+
+void engine_set_far_lod_scale(float k) { lcs_set_far_lod_scale(k); }
+
+/* once a second while verifying */
+void engine_report(void) {
+    static unsigned frames;
+    uint64_t n[2];
+    if (++frames % 60) return;
+    lcs_engine_verify_counts(n);
+    if (n[0]) rt_log("engine: verified %llu calls, %llu mismatches\n", (unsigned long long)n[0], (unsigned long long)n[1]);
+}

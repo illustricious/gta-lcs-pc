@@ -19,6 +19,7 @@ The game boots to gameplay and plays: title, legal screens, menu, new game, load
 | Input | SDL3 gamepad, keyboard and mouse camera. Bindings are editable in the menu. |
 | Menu | Host-drawn main/pause menu in `rt/frontend.c`. It uses the original fonts, sprites, sounds and actions, and shows the live map in the pause pane. |
 | Display | Windowed, borderless and exclusive modes; Alt+Enter / F11; resizable window. |
+| Rust engine ports | `recomp/engine` (no_std staticlib) replaces hooked functions. The 6 `CSimpleModelInfo` LOD queries are ported and shadow-verified: over 1M calls, 0 mismatches. See [recomp/engine/README.md](recomp/engine/README.md). |
 | Distribution | `LCS-PC-Setup.exe` builds the game on the player's PC from their own APKs (see [recomp/installer/README.md](recomp/installer/README.md)). |
 
 ## Repository map

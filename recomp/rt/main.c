@@ -511,6 +511,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) max_frames = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--set") && i + 2 < argc) { tweaks_set(argv[i + 1], argv[i + 2]); i += 2; }
         else if (!strcmp(argv[i], "--autowalk")) { extern int tweaks_autowalk; tweaks_autowalk = 1; }
+        else if (!strcmp(argv[i], "--teleport") && i + 4 < argc) { /* tests: X Y Z HEADING once in gameplay */
+            extern float tweaks_teleport[4]; extern int tweaks_teleport_pending;
+            for (int k = 0; k < 4; k++) tweaks_teleport[k] = (float)atof(argv[i + 1 + k]);
+            tweaks_teleport_pending = 1; i += 4;
+        }
         else if (!strcmp(argv[i], "--axis") && i + 3 < argc && nscript < 64) {
             script[nscript].frame = (unsigned)atoi(argv[i + 1]); script[nscript].axis = atoi(argv[i + 2]) % 6;
             script[nscript].x = (float)atof(argv[i + 3]); script[nscript++].button = 0;
@@ -582,6 +587,7 @@ int main(int argc, char **argv) {
         if (plat.win_w <= 0 || plat.win_h <= 0) { plat.win_w = 1280; plat.win_h = 720; }
     }
     rt_init(lib_dir);
+    { void engine_init(void); engine_init(); } /* Rust engine ports (recomp/engine) */
     cpu = rt_cpu();
     if (watchdog) { void rt_watchdog(unsigned); rt_watchdog((unsigned)watchdog); }
     rt_run_init_arrays();

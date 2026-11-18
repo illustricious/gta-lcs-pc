@@ -24,7 +24,10 @@ from a64 import Translator, Unsupported, hx, split_top  # noqa: E402
 # Host wrappers retain the generated implementation as <entry>_orig.
 # Calls and dispatch tables keep the public entry name, so both direct and
 # indirect guest calls pass through the wrapper. Addresses are version-pinned.
-HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8}}
+# Functions replaced by host code: the recompiled body becomes <entry>_orig.
+# 0x496d04..0x496e80: CSimpleModelInfo LOD queries, ported to Rust (recomp/engine/src/lod.rs).
+HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8,
+                    0x496d04, 0x496d20, 0x496d80, 0x496dc4, 0x496e2c, 0x496e80}}
 
 CHUNK = 0x8000  # bytes of guest text per generated C file
 TERMINATORS = {'b', 'ret', 'br', 'brk', 'udf', '.byte'}
