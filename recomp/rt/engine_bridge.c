@@ -15,7 +15,10 @@ __declspec(noreturn) void rt_engine_panic(void) { rt_fatal("Rust engine panic");
 
 void rt_engine_mismatch(uintptr_t original, uint64_t ours, uint64_t theirs) {
     static int shown;
-    if (shown++ < 20) rt_log("engine: MISMATCH in %p: rust %llx, original %llx\n", (void *)original,
+    /* the function as an address in lcs.map (image base 0x140000000) */
+    extern __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
+    uintptr_t at = original - (uintptr_t)GetModuleHandleA(0) + 0x140000000u;
+    if (shown++ < 20) rt_log("engine: MISMATCH in %llx (lcs.map): rust %llx, original %llx\n", (unsigned long long)at,
                              (unsigned long long)ours, (unsigned long long)theirs);
 }
 

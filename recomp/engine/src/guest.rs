@@ -51,3 +51,38 @@ pub fn sqrt(v: f32) -> f32 {
     use core::arch::x86_64::*;
     unsafe { _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(v))) }
 }
+
+/// Like [`call`], also passing float arguments in s0..s7.
+pub unsafe fn call_f(c: *mut Cpu, va: u64, args: &[u64], fargs: &[f32]) -> (u64, f32) {
+    let saved: Cpu = *c;
+    for (i, a) in args.iter().enumerate() {
+        (*c).x[i] = *a;
+    }
+    for (i, a) in fargs.iter().enumerate() {
+        (*c).set_s(i, *a);
+    }
+    rt_call(c, G + va);
+    let result = ((*c).x[0], (*c).s(0));
+    *c = saved;
+    result
+}
+
+/// ARM64 fmin / fmax (NaN in, NaN out; -0 is below +0).
+pub fn fmin(a: f32, b: f32) -> f32 {
+    if a.is_nan() || b.is_nan() {
+        return f32::NAN;
+    }
+    if a == b {
+        return f32::from_bits(a.to_bits() | b.to_bits());
+    }
+    if a < b { a } else { b }
+}
+pub fn fmax(a: f32, b: f32) -> f32 {
+    if a.is_nan() || b.is_nan() {
+        return f32::NAN;
+    }
+    if a == b {
+        return f32::from_bits(a.to_bits() & b.to_bits());
+    }
+    if a > b { a } else { b }
+}

@@ -163,3 +163,26 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - `radar_scale` (lcs.ini, Graphics → RADAR SIZE, 75-150%) and the bottom-left placement are applied by
   `lcs_radar_layout()` in `recomp/engine/src/hud.rs`, which moves and resizes the HUD layout's radar widget.
 - The CHud radar getters and five CRadar helpers are Rust ports, shadow-verified against the originals.
+
+## CTimeCycle in Rust; why buildings swap LOD to detail (19 Nov 2026)
+- CTimeCycle (ForceUpdate, UpdateArrays, FillGaps, extra colours) is rewritten in `recomp/engine/src/timecycle.rs`
+  and shadow-verified (0 mismatches over 2M calls).
+- Building LOD swaps cannot be moved by settings. The city is drawn by `cWorldStream::Render` from the streamed
+  sector of the camera's cell; each sector was built offline (`cWorldGeom::BuildCell`/`SetLodDistance`, which only
+  run in the world builder) with detailed models for nearby buildings and LOD models beyond. At run time an instance
+  is only sphere-culled (`cWorldStream::Render(sGeomInstance*)`); no distance is compared, and
+  `TheCamera.LODDistMultiplier` (CCamera+0xf0) is not read by the world stream. Moving the swap needs re-baked
+  sector data (detailed instances from neighbouring cells merged in, their LOD instances removed).
+- Debugging: `LCS_DV="dvName=value,..."` forces DebugTweak floats every frame (rt/tweaks.c).
+
+## Per-action bindings and CCamera in Rust (19 Nov 2026)
+- 16 CPad action getters are Rust ports (`recomp/engine/src/pad.rs`). Each can be bound to its own key separately
+  on foot and in a vehicle: `foot_sprint=Left Shift`, `car_accelerate=W`, `foot_move_x=A,D` (lcs.ini). Unbound
+  actions keep the gamepad mapping. Checked: with `foot_move_x/y` bound and not pressed, the scripted stick no
+  longer walks the player (speed 0 instead of 3-5 u/s).
+- Menu: SETTINGS > CONTROLS > ON FOOT KEYS / VEHICLE KEYS. Enter (or A) then a key or mouse button binds the action,
+  Delete clears it (back to the gamepad mapping), Esc cancels; CLEAR ALL resets the page. A key is unique within a
+  context, so binding it removes it from the other action. Each change is saved to lcs.ini at once.
+- Not bound yet: vehicle steering, horn, camera look, targeting (their getters are still recompiled C).
+- 26 CCamera/CCam queries and setters are Rust ports (`camera.rs`); the camera modes (`CCam::Process_*`,
+  `CCamera::Process`, `CamControl`) are still recompiled C.

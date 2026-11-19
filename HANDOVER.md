@@ -58,7 +58,7 @@ The game boots to gameplay and plays: title, legal screens, menu, new game, load
 - **Rockstar gate.** By default the gate is answered as for an owner. The installer only builds from data copied from the user's own copy. `--trial` closes the gate. Nothing is verified online.
 - **Social Club.** `GameLoad` completes as an offline session.
 - **Controller always present.** The keyboard and mouse are reported as controller 0 (`setNoJoysticks(1)`), so the game uses its gamepad scheme.
-- **Draw distance is conservative.** Building LOD swaps and sector streaming stay at the original values, because raising them caused pop-in. Only vehicle and ped distances, the small-object cull fade and the far clip are scaled (see [recomp/SETTINGS.md](recomp/SETTINGS.md)).
+- **Draw distance is conservative.** Building LOD swaps and sector streaming stay at the original values, because raising them caused pop-in. Only vehicle and ped distances, the small-object cull fade and the far clip are scaled (see [recomp/SETTINGS.md](recomp/SETTINGS.md)). The building LOD-to-detail distance is baked into the world sector data, so changing it needs a sector re-bake tool.
 - **No game code in releases.** The installer ships sources and recompiles the player's own `libGame.so`.
 
 ## Next work

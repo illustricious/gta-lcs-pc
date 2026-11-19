@@ -57,7 +57,7 @@ static int input_root(void) { return host_active() && root_drawn && plat.frames-
  * the engine's own aScreens table and driven through the native selection + A button, so each action
  * (save, load, new game, ...) runs the original code. Help/Brief/Stats and the leaf settings pages
  * stay native. */
-enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE };
+enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE, K_ACT, K_ACT_CLEAR };
 typedef struct Row { const char *label; int kind; int arg; } Row;
 enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_COUNT };
 static const Row boot_rows[] = {{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
@@ -69,12 +69,30 @@ enum { C_LOOK = 20, C_SENS, C_MOUSE0 /* 22..24 */ };
 /* button ids match main.c: A B X Y START BACK L1 R1 UP DOWN LEFT RIGHT L3 R3 */
 static const char *button_names[14] = {"BUTTON A","BUTTON B","BUTTON X","BUTTON Y","START","SELECT","L1","R1","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","L3","R3"};
 static const Row controls_rows[] = {
+    {"ON FOOT KEYS",K_SUB,4},{"VEHICLE KEYS",K_SUB,5},
     {"MOUSE LOOK",K_VALUE,C_LOOK},{"SENSITIVITY",K_VALUE,C_SENS},
     {"LEFT CLICK",K_VALUE,C_MOUSE0},{"RIGHT CLICK",K_VALUE,C_MOUSE0+1},{"MIDDLE CLICK",K_VALUE,C_MOUSE0+2},
     {"BUTTON A",K_BIND,0},{"BUTTON B",K_BIND,1},{"BUTTON X",K_BIND,2},{"BUTTON Y",K_BIND,3},{"START",K_BIND,4},{"SELECT",K_BIND,5},
     {"L1",K_BIND,6},{"R1",K_BIND,7},{"D-PAD UP",K_BIND,8},{"D-PAD DOWN",K_BIND,9},{"D-PAD LEFT",K_BIND,10},{"D-PAD RIGHT",K_BIND,11},
     {"L3",K_BIND,12},{"R3",K_BIND,13},{"RESET DEFAULTS",K_RESET,0},{"BACK",K_BACK,0}};
 #define CONTROLS_COUNT ((int)(sizeof controls_rows / sizeof controls_rows[0]))
+/* Per-action keys (main.c host_act_*, used by the Rust CPad ports). arg = vehicle << 8 | action << 1 | slot;
+ * action ids match main.c `ACT_*`, slot 1 = positive key of a move axis. Unbound = the gamepad mapping. */
+#define ACT(veh, a, slot) ((veh) << 8 | (a) << 1 | (slot))
+static const Row foot_rows[] = {
+    {"SPRINT",K_ACT,ACT(0,4,0)},{"JUMP",K_ACT,ACT(0,5,0)},{"ENTER VEHICLE",K_ACT,ACT(0,3,0)},{"ATTACK",K_ACT,ACT(0,6,0)},
+    {"NEXT WEAPON",K_ACT,ACT(0,7,0)},{"PREVIOUS WEAPON",K_ACT,ACT(0,8,0)},{"PICK UP",K_ACT,ACT(0,9,0)},
+    {"LOOK BEHIND",K_ACT,ACT(0,10,0)},{"MOVE FORWARD",K_ACT,ACT(0,12,0)},{"MOVE BACK",K_ACT,ACT(0,12,1)},
+    {"MOVE LEFT",K_ACT,ACT(0,11,0)},{"MOVE RIGHT",K_ACT,ACT(0,11,1)},{"CLEAR ALL",K_ACT_CLEAR,0},{"BACK",K_BACK,0}};
+static const Row car_rows[] = {
+    {"ACCELERATE",K_ACT,ACT(1,0,0)},{"BRAKE / REVERSE",K_ACT,ACT(1,1,0)},{"HANDBRAKE",K_ACT,ACT(1,2,0)},
+    {"EXIT VEHICLE",K_ACT,ACT(1,3,0)},{"DRIVE-BY",K_ACT,ACT(1,6,0)},{"NEXT WEAPON",K_ACT,ACT(1,7,0)},
+    {"PREVIOUS WEAPON",K_ACT,ACT(1,8,0)},{"CLEAR ALL",K_ACT_CLEAR,1},{"BACK",K_BACK,0}};
+int host_act_get(int veh, int a, int slot);
+void host_act_set(int veh, int a, int slot, int k);
+void host_act_clear(int veh);
+void host_act_key_name(int k, char *o, size_t n);
+static int capture_act = -1;
 static int capture_btn = -1, scroll_top;
 #define VISIBLE_ROWS 8
 #define VALUE_X 196.0f /* value column, 640x448 menu space */
@@ -353,6 +371,8 @@ static int cur_rows(const Row **out) {
     if (s == 2) { *out = game_rows; return game_count; }
     if (engine_page(s)) { *out = eng_rows; return eng_count; }
     if (s == 41 && sub == 3) { *out = controls_rows; return CONTROLS_COUNT; }
+    if (s == 41 && sub == 4) { *out = foot_rows; return (int)(sizeof foot_rows / sizeof foot_rows[0]); }
+    if (s == 41 && sub == 5) { *out = car_rows; return (int)(sizeof car_rows / sizeof car_rows[0]); }
     if (s == 41 && sub == 2) { *out = graphics_rows; return (int)(sizeof graphics_rows / sizeof graphics_rows[0]); }
     if (s == 41) { *out = settings_rows; return 7; }
     *out = s == 52 ? pause_rows : s == 69 ? continue_rows : boot_rows;
@@ -394,6 +414,8 @@ static void native_back(CPU *c) {
 }
 static void go_back(CPU *c) {
     if (capture_btn >= 0) capture_btn = -1;
+    else if (capture_act >= 0) capture_act = -1;
+    else if (sub >= 4) set_sub(3, sub - 4); /* back to CONTROLS, on the row that opened the page */
     else if (sub) set_sub(0, sub == 2 ? 0 : 1);
     else if (MS32(MENU + SCREEN) == 41) { navigate(c, root_ctx); selection = 1; last_screen = -1; keep_key = view_key(); }
     else if (engine_page(MS32(MENU + SCREEN))) { /* back to SETTINGS, on the row that opened this page */
@@ -423,6 +445,8 @@ static void activate(CPU *c) {
     case K_BACK: go_back(c); break;
     case K_ENGINE: engine_adjust(c, x->arg, 1); break;
     case K_BIND: capture_btn = x->arg; break;
+    case K_ACT: capture_act = x->arg; break;
+    case K_ACT_CLEAR: host_act_clear(x->arg); break;
     case K_RESET: {
         host_bind_reset(); char v[32], k[32];
         for (int i = 0; i < 14; i++) { snprintf(k, sizeof k, "bind_%d", i); snprintf(v, sizeof v, "%d", host_bind_get(i, 0)); tweaks_save(k, v); }
@@ -461,7 +485,30 @@ int frontend_button(CPU *c, int b, int down) {
     else { ui_sound(SND_SELECT); activate(c); }
     return 1;
 }
+static void act_text(int arg, char *o, size_t n) {
+    if (capture_act == arg) { snprintf(o, n, "PRESS A KEY"); return; }
+    int k = host_act_get(arg >> 8, (arg >> 1) & 0x7f, arg & 1);
+    host_act_key_name(k, o, n);
+    if (!o[0]) snprintf(o, n, "GAMEPAD");
+    for (char *p = o; *p; p++) if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
+}
+int frontend_mouse(int button) {
+    if (capture_act < 0) return 0;
+    host_act_set(capture_act >> 8, (capture_act >> 1) & 0x7f, capture_act & 1, 1000 + button);
+    ui_sound(SND_SELECT);
+    capture_act = -1;
+    return 1;
+}
 int frontend_key(int scancode) {
+    if (capture_act >= 0) {
+        if (scancode == SDL_SCANCODE_F11 || scancode == SDL_SCANCODE_F4) return 0;
+        if (scancode != SDL_SCANCODE_ESCAPE) { /* Delete clears the binding (back to the gamepad mapping) */
+            host_act_set(capture_act >> 8, (capture_act >> 1) & 0x7f, capture_act & 1, scancode == SDL_SCANCODE_DELETE ? 0 : scancode);
+            ui_sound(SND_SELECT);
+        }
+        capture_act = -1;
+        return 1;
+    }
     if (capture_btn < 0) return 0;
     if (scancode != SDL_SCANCODE_ESCAPE && scancode != SDL_SCANCODE_F11 && scancode != SDL_SCANCODE_F4) {
         char k[32], v[32];
@@ -660,7 +707,7 @@ void G_527bf4(CPU *c) {
     }
     const Row *items; int count = cur_rows(&items);
     int has_value = selection < count && (items[selection].kind == K_VALUE || items[selection].kind == K_ENGINE);
-    int is_bind = selection < count && items[selection].kind == K_BIND;
+    int is_bind = selection < count && (items[selection].kind == K_BIND || items[selection].kind == K_ACT);
     int last = scroll_top + VISIBLE_ROWS < count ? scroll_top + VISIBLE_ROWS : count;
     for (int i = scroll_top; i < last; i++) {
         float y = row_top() + (i - scroll_top) * row_step(), h = row_step()-5;
@@ -685,8 +732,9 @@ void G_527bf4(CPU *c) {
         }
         else if (items[i].kind == K_ENGINE && eng_value[i][0]) snprintf(shown, sizeof shown, i == selection ? "< %s >" : "%s", eng_value[i]);
         else if (items[i].kind == K_BIND) { bind_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, "%s", val); }
+        else if (items[i].kind == K_ACT) { act_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, "%s", val); }
         else shown[0] = 0;
-        if (shown[0]) text(c, shown, VALUE_X, ty, .46f, (i == selection || (items[i].kind == K_BIND && capture_btn == items[i].arg)) ? 0xff2424a7 : 0xffd2d2d2);
+        if (shown[0]) text(c, shown, VALUE_X, ty, .46f, (i == selection || (items[i].kind == K_BIND && capture_btn == items[i].arg) || (items[i].kind == K_ACT && capture_act == items[i].arg)) ? 0xff2424a7 : 0xffd2d2d2);
     }
     if (count > VISIBLE_ROWS) { /* scroll bar */
         float top = row_top(), span = VISIBLE_ROWS * row_step() - 5;
@@ -697,6 +745,7 @@ void G_527bf4(CPU *c) {
     float fy = 426.0f - 15.0f * (can_back ? 2 : 1);
     int pad = plat.pad_input; /* hints follow the device that was used last */
     if (capture_btn >= 0) { text(c, "PRESS A KEY   ESC CANCEL", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
+    else if (capture_act >= 0) { text(c, "PRESS A KEY OR MOUSE BUTTON   DEL CLEAR   ESC CANCEL", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
     else if (has_value) { text(c, pad ? "D-PAD LEFT / RIGHT   CHANGE" : "LEFT / RIGHT   CHANGE", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
     else if (is_bind) { text(c, pad ? "A   REBIND KEY" : "ENTER   REBIND KEY", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
     else { text(c, pad ? "D-PAD   SELECT" : "UP / DOWN   SELECT", 26, fy, .40f, 0xffbfbfbf); fy += 15; }

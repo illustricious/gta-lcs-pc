@@ -117,6 +117,102 @@ void platform_present(void) {
 
 enum { B_A, B_B, B_X, B_Y, B_START, B_BACK, B_L1, B_R1, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_L3, B_R3, B_COUNT };
 
+/* Per-action bindings, separate on foot and in a vehicle. The Rust CPad ports (recomp/engine/src/pad.rs) ask
+ * host_action() inside each action getter; an unbound action keeps the gamepad button the game expects.
+ * lcs.ini: foot_<action>=<key> / car_<action>=<key>, keys by SDL name ("Left Shift", "W") or Mouse1..Mouse3;
+ * move_x / move_y take two keys, "A,D". Must match `enum Act` in pad.rs. */
+enum { ACT_ACCELERATE, ACT_BRAKE, ACT_HANDBRAKE, ACT_ENTER_EXIT, ACT_SPRINT, ACT_JUMP, ACT_ATTACK, ACT_NEXT_WEAPON,
+       ACT_PREV_WEAPON, ACT_PICKUP, ACT_LOOK_BEHIND, ACT_MOVE_X, ACT_MOVE_Y, ACT_COUNT };
+static const char *act_names[ACT_COUNT] = {"accelerate", "brake", "handbrake", "enter_exit", "sprint", "jump", "attack",
+                                           "next_weapon", "prev_weapon", "pickup", "look_behind", "move_x", "move_y"};
+static int act_key[2][ACT_COUNT][2];  /* [vehicle][action]: key (axis: negative key), axis positive key */
+static unsigned char act_now[2][ACT_COUNT], act_prev[2][ACT_COUNT];
+static signed char act_axis[2][ACT_COUNT];
+static int act_any;
+#define ACT_MOUSE 1000 /* + SDL mouse button */
+
+static int act_parse_key(const char *s) {
+    while (*s == ' ') s++;
+    if (!SDL_strncasecmp(s, "mouse", 5)) return ACT_MOUSE + atoi(s + 5);
+    return (int)SDL_GetScancodeFromName(s);
+}
+/* "foot_sprint" / "car_accelerate" = key; returns 1 when the key was an action binding */
+int host_action_ini(const char *key, const char *val) {
+    int veh = !strncmp(key, "car_", 4);
+    if (!veh && strncmp(key, "foot_", 5)) return 0;
+    const char *name = key + (veh ? 4 : 5);
+    for (int a = 0; a < ACT_COUNT; a++) {
+        if (strcmp(name, act_names[a])) continue;
+        char buf[128]; snprintf(buf, sizeof buf, "%s", val);
+        char *comma = strchr(buf, ',');
+        if (comma) *comma = 0;
+        act_key[veh][a][0] = act_parse_key(buf);
+        act_key[veh][a][1] = comma ? act_parse_key(comma + 1) : 0;
+        act_any |= act_key[veh][a][0] || act_key[veh][a][1];
+        return 1;
+    }
+    return 1;
+}
+static int act_held(const bool *ks, int k) {
+    if (k <= 0) return 0;
+    if (k >= ACT_MOUSE) return (SDL_GetMouseState(0, 0) & SDL_BUTTON_MASK(k - ACT_MOUSE)) != 0;
+    return k < SDL_SCANCODE_COUNT && ks[k];
+}
+static void actions_frame(const bool *ks) {
+    if (!act_any) return;
+    for (int v = 0; v < 2; v++)
+        for (int a = 0; a < ACT_COUNT; a++) {
+            act_prev[v][a] = act_now[v][a];
+            int neg = act_held(ks, act_key[v][a][0]), pos = act_held(ks, act_key[v][a][1]);
+            act_now[v][a] = (unsigned char)neg;
+            act_axis[v][a] = (signed char)((pos - neg) * 127);
+        }
+}
+int host_actions_bound(void) { return act_any; }
+
+/* Menu access (rt/frontend.c, ON FOOT KEYS / VEHICLE KEYS): slot 1 is the positive key of move_x / move_y. */
+int host_act_get(int veh, int a, int slot) { return a >= 0 && a < ACT_COUNT && slot >= 0 && slot < 2 ? act_key[veh != 0][a][slot] : 0; }
+void host_act_key_name(int k, char *o, size_t n) {
+    if (k >= ACT_MOUSE) snprintf(o, n, "Mouse%d", k - ACT_MOUSE);
+    else snprintf(o, n, "%s", k > 0 ? SDL_GetScancodeName((SDL_Scancode)k) : "");
+}
+static void act_save(int veh, int a) {
+    char key[48], v1[48], v2[48], val[100];
+    snprintf(key, sizeof key, "%s_%s", veh ? "car" : "foot", act_names[a]);
+    host_act_key_name(act_key[veh][a][0], v1, sizeof v1);
+    host_act_key_name(act_key[veh][a][1], v2, sizeof v2);
+    if (act_key[veh][a][1]) snprintf(val, sizeof val, "%s,%s", v1, v2); else snprintf(val, sizeof val, "%s", v1);
+    tweaks_save(key, val);
+}
+static void act_recount(void) {
+    act_any = 0;
+    for (int v = 0; v < 2; v++) for (int a = 0; a < ACT_COUNT; a++) act_any |= act_key[v][a][0] || act_key[v][a][1];
+}
+/* k = 0 clears; the same key is removed from the other actions of this context */
+void host_act_set(int veh, int a, int slot, int k) {
+    veh = veh != 0;
+    if (a < 0 || a >= ACT_COUNT || slot < 0 || slot > 1) return;
+    if (k)
+        for (int b = 0; b < ACT_COUNT; b++)
+            for (int s = 0; s < 2; s++)
+                if (act_key[veh][b][s] == k && !(b == a && s == slot)) { act_key[veh][b][s] = 0; act_save(veh, b); }
+    act_key[veh][a][slot] = k;
+    act_save(veh, a);
+    act_recount();
+}
+void host_act_clear(int veh) {
+    for (int a = 0; a < ACT_COUNT; a++) { act_key[veh != 0][a][0] = act_key[veh != 0][a][1] = 0; act_save(veh != 0, a); }
+    act_recount();
+}
+int host_action(int a, int vehicle) {
+    if (a < 0 || a >= ACT_COUNT || !act_key[vehicle != 0][a][0]) return -1;
+    return act_now[vehicle != 0][a] | act_prev[vehicle != 0][a] << 1;
+}
+int host_action_axis(int a, int vehicle) {
+    if (a < 0 || a >= ACT_COUNT || (!act_key[vehicle != 0][a][0] && !act_key[vehicle != 0][a][1])) return INT32_MIN;
+    return act_axis[vehicle != 0][a] * 128 / 127;
+}
+
 static int held[B_COUNT];       /* number of host inputs currently holding each guest button */
 static float axis_sent[6];
 static int gamepads;
@@ -326,6 +422,7 @@ static void pump_events(void) {
         case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
             int down = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
             plat.pad_input = 0;
+            if (down && frontend_mouse(e.button.button)) break; /* host menu is capturing an action key */
             if (mouse_look_active()) {
                 int mb = e.button.button == SDL_BUTTON_LEFT ? mousebind[0] : e.button.button == SDL_BUTTON_RIGHT ? mousebind[1]
                        : e.button.button == SDL_BUTTON_MIDDLE ? mousebind[2] : -1;
@@ -397,6 +494,7 @@ static void pump_events(void) {
     set_axis(3, ry);
     set_axis(4, pad_axis[4] + script_axis[4] + (float)ks[SDL_SCANCODE_Z]);
     set_axis(5, pad_axis[5] + script_axis[5] + (float)ks[SDL_SCANCODE_X]);
+    actions_frame(ks);
 }
 
 void host_script_axis(int axis, float value) { script_axis[axis] = value; }

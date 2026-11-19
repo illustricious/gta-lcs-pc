@@ -48,6 +48,10 @@ static const char *DEFAULT_INI =
     "radar_margin=28\n"
     "; radar size: 0.75 .. 1.5\n"
     "radar_scale=1.0\n"
+    "; per-action keys, separate on foot (foot_) and in vehicles (car_); unset = the gamepad mapping.\n"
+    "; actions: accelerate brake handbrake enter_exit sprint jump attack next_weapon prev_weapon pickup\n"
+    ";          look_behind move_x move_y (two keys: negative,positive). Keys by SDL name or Mouse1..Mouse3.\n"
+    "; examples: car_accelerate=W  car_brake=S  car_handbrake=Space  foot_sprint=Left Shift  foot_jump=Space\n"
     "\n"
     "; draw distance: 1.0 = original, up to 3.0 (vehicles, peds, small objects, far clip)\n"
     "draw_distance=2.0\n"
@@ -80,6 +84,7 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strcmp(line, "fps_cap")) plat.fps_cap = atoi(val);
     else if (!strcmp(line, "vsync")) plat.vsync = atoi(val);
     else if (!strncmp(line, "bind_", 5) || !strncmp(line, "mbind_", 6)) host_bind_ini(line, atoi(val));
+    else if (!strncmp(line, "foot_", 5) || !strncmp(line, "car_", 4)) { int host_action_ini(const char *, const char *); host_action_ini(line, val); }
     else if (!strcmp(line, "mouse_look")) plat.mouse_look = atoi(val);
     else if (!strcmp(line, "mouse_sensitivity")) plat.mouse_sensitivity = (float)atof(val);
     else if (!strcmp(line, "definitive_menu")) frontend_set_enabled(atoi(val) != 0);
@@ -328,6 +333,18 @@ void tweaks_apply(CPU *c) {
         void lcs_radar_layout(void); lcs_radar_layout();
     }
     scale_draw_distance();
+    {   /* debugging: LCS_DV="dvName=value,dvName=value" forces DebugTweak floats every frame */
+        static char spec[1024]; static int init;
+        if (!init) { const char *e = getenv("LCS_DV"); if (e) snprintf(spec, sizeof spec, "%s", e); init = 1; }
+        if (spec[0]) {
+            char buf[1024]; snprintf(buf, sizeof buf, "%s", spec);
+            for (char *tok = strtok(buf, ","); tok; tok = strtok(0, ",")) {
+                char *eq = strchr(tok, '='); if (!eq) continue; *eq = 0;
+                uint64_t a = rt_sym(tok);
+                if (a && MF32(a + DV_VALUE) != (float)atof(eq + 1)) { MF32(a + DV_VALUE) = (float)atof(eq + 1); M8(MENU_APPLY_FLAG) = 1; }
+            }
+        }
+    }
     apply_res_scale();
     {   /* big-building LOD models are drawn farther (Rust port of CSimpleModelInfo, recomp/engine/src/lod.rs) */
         void engine_set_far_lod_scale(float k); void engine_report(void);

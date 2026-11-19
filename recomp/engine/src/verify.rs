@@ -94,3 +94,84 @@ pub unsafe fn port_mem(c: *mut Cpu, original: unsafe extern "C" fn(*mut Cpu), re
         rt_engine_mismatch(original as usize, ours, other);
     }
 }
+
+/// Scratch for [`port_regions`], used as a stack because verified ports call other verified ports.
+const SCRATCH: usize = 1 << 16;
+static mut BEFORE: [u8; SCRATCH] = [0; SCRATCH];
+static mut THEIRS: [u8; SCRATCH] = [0; SCRATCH];
+static mut USED: usize = 0;
+
+/// Like [`port_mem`], for functions that write several memory ranges (`(address, length)`), such as
+/// object fields and globals. `regions` is evaluated before either version runs.
+#[inline]
+pub unsafe fn port_regions(c: *mut Cpu, original: unsafe extern "C" fn(*mut Cpu), ret: Ret, regions: &[(u64, usize)], f: impl FnOnce(&mut Cpu)) {
+    if !enabled() {
+        f(&mut *c);
+        return;
+    }
+    let base = USED;
+    let total: usize = regions.iter().filter(|r| r.0 != 0).map(|r| r.1).sum();
+    if base + total > SCRATCH {
+        f(&mut *c); // too deep to verify
+        return;
+    }
+    USED = base + total;
+    let before = (core::ptr::addr_of_mut!(BEFORE) as *mut u8).add(base);
+    let theirs = (core::ptr::addr_of_mut!(THEIRS) as *mut u8).add(base);
+    let mut at = 0;
+    for &(p, n) in regions {
+        if p == 0 {
+            continue;
+        }
+        core::ptr::copy_nonoverlapping(p as *const u8, before.add(at), n);
+        at += n;
+    }
+    let mut shadow: Cpu = *c;
+    original(&mut shadow);
+    at = 0;
+    for &(p, n) in regions {
+        if p == 0 {
+            continue;
+        }
+        core::ptr::copy_nonoverlapping(p as *const u8, theirs.add(at), n);
+        core::ptr::copy_nonoverlapping(before.add(at), p as *mut u8, n);
+        at += n;
+    }
+    f(&mut *c);
+    CALLS.fetch_add(1, Ordering::Relaxed);
+    let mut differ = false;
+    let mut first_diff = 0u64;
+    let mut first_base = 0u64;
+    at = 0;
+    for &(p, n) in regions {
+        if p == 0 {
+            continue;
+        }
+        let ours = core::slice::from_raw_parts(p as *const u8, n);
+        let other = core::slice::from_raw_parts(theirs.add(at), n);
+        if let Some(i) = (0..n).find(|&i| ours[i] != other[i]) {
+            if !differ {
+                first_diff = p + i as u64;
+                first_base = p;
+            }
+            differ = true;
+        }
+        at += n;
+    }
+    USED = base;
+    let (ours, other) = match ret {
+        Ret::X0 => ((*c).x[0], shadow.x[0]),
+        Ret::W0 => ((*c).x[0] as u32 as u64, shadow.x[0] as u32 as u64),
+        Ret::S0 => ((*c).v[0][0] as u32 as u64, shadow.v[0][0] as u32 as u64),
+        Ret::None => (0, 0),
+    };
+    if differ || ours != other {
+        MISMATCHES.fetch_add(1, Ordering::Relaxed);
+        // memory differences report the first differing address and its region instead of the results
+        if differ {
+            rt_engine_mismatch(original as usize, first_diff, first_base);
+        } else {
+            rt_engine_mismatch(original as usize, ours, other);
+        }
+    }
+}

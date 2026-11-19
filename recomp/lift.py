@@ -30,7 +30,17 @@ HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8,
                     0x496d04, 0x496d20, 0x496d80, 0x496dc4, 0x496e2c, 0x496e80,
                     0x4772fc,
                     # CHud radar getters and CRadar helpers, ported to Rust (recomp/engine/src/hud.rs)
-                    0x48411c, 0x48416c, 0x4841c8, 0x484224, 0x35a400, 0x358b34, 0x358b98, 0x358bd8}}  # CFont::PrintString: text capture for host-drawn engine menu pages (rt/frontend.c)
+                    0x48411c, 0x48416c, 0x4841c8, 0x484224, 0x35a400, 0x358b34, 0x358b98, 0x358bd8,
+                    # CTimeCycle and FillGaps<T>, rewritten in Rust (recomp/engine/src/timecycle.rs)
+                    0x36d570, 0x3705f0, 0x37060c, 0x370630, 0x36d194, 0x36f090, 0x36f66c, 0x36fd14,
+                    0x3703bc, 0x370428, 0x370494, 0x370518, 0x37058c,
+                    # CPad action getters with per-action bindings (recomp/engine/src/pad.rs)
+                    0x345e84, 0x345c20, 0x345b70, 0x345d94, 0x345de4, 0x345c88, 0x345cbc, 0x3464e4,
+                    0x345684, 0x345780, 0x345e1c, 0x345e48, 0x346038, 0x346090, 0x346758, 0x345a20,
+                    # CCamera / CCam queries and setters (recomp/engine/src/camera.rs)
+                    0x3135fc, 0x329e10, 0x329ee8, 0x329dd4, 0x329de0, 0x328164, 0x329dec, 0x3299c4, 0x32e3f4,
+                    0x329e18, 0x329eac, 0x32e1f8, 0x31fb84, 0x313a78, 0x32807c, 0x328088, 0x327324, 0x32af08,
+                    0x32dffc, 0x326a20, 0x32bf70, 0x32e080, 0x32e438, 0x32e410, 0x32e220, 0x32e310}}  # CFont::PrintString: text capture for host-drawn engine menu pages (rt/frontend.c)
 
 CHUNK = 0x8000  # bytes of guest text per generated C file
 TERMINATORS = {'b', 'ret', 'br', 'brk', 'udf', '.byte'}
