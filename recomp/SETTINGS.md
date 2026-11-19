@@ -220,3 +220,25 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - FIELD OF VIEW (GRAPHICS, lcs.ini `fov_scale` 0.9-1.4): `CDraw::SetFOV` is a Rust port (camera.rs) that widens
   camera FOVs of 50 degrees and up, capped at 120; zoomed views keep theirs.
 - Android on-screen controls: `Touchscreen::Render` (0x543b7c) is skipped unless lcs.ini sets `touch_controls=1`; touch input still works.
+
+## Camera distance (19 Nov 2026)
+- The game runs `CCam::Process_FollowPed_SA` (0x318b8c, 1353 instructions) on foot and `Process_FollowCar_SA` (0x3173ac,
+  1528) in vehicles; `Process_FollowPed` and `Process_BehindCar` are never called (measured with call counters).
+  Both are still recompiled C: porting them to Rust is the next big camera step.
+- `Process_FollowPed_SA` reads its distances from a table of three 0x3c-byte entries (GOT +0x468, first entry
+  `0.6 2 0.15 2 4 0.8 ...`). Fields 1, 3 and 4 are the follow distances. `camera_distance` (lcs.ini, GRAPHICS > CAMERA
+  DISTANCE, 80% .. 160%) scales them from the start-up values (`apply_camera_distance` in rt/tweaks.c).
+- Checked on foot at a fixed spot: 1.6 puts the camera visibly farther back and higher. In vehicles the camera is
+  unchanged (its parameters sit in separate arrays, GOT +0x418..0x450, not mapped yet).
+
+## Default keys per context (19 Nov 2026)
+- Before, the keyboard reached the game only as pad buttons, the same on foot and in a vehicle, so Space (= Cross) jumped
+  on foot but accelerated/braked in a car. Now both contexts have their own default keys (rt/main.c `act_defaults`):
+  - On foot: A/D and W/S move, Left Shift sprint, Space jump, F enter vehicle, Mouse1 attack, E / Q next / previous weapon.
+  - In a vehicle: W accelerate, S brake/reverse, Space handbrake, A/D steer, Up/Down bike lean, F exit, H horn,
+    Q / E look left / right, V look behind.
+- lcs.ini `foot_<action>=` / `car_<action>=` override a default; an empty value unbinds the action (the pad button
+  applies again). In the key pages, RESET ALL restores that page's defaults; Delete clears one action.
+- Checked on foot: with the scripted stick pushed and no key held the player stays still (0 u/s); holding W walks at a
+  steady 5.3 u/s. In-vehicle keys are not checked end to end (a gamepad on this PC adds noise to scripted drives).
+- Test option `--key FROM TO NAME` holds a key between two frames for the per-action bindings.

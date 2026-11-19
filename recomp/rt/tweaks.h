@@ -13,6 +13,8 @@ float tweaks_radar_scale(void);
 float tweaks_fov_scale(void);
 int tweaks_touch_controls(void);
 void tweaks_set_fov_scale(float s);
+float tweaks_camera_distance(void);
+void tweaks_set_camera_distance(float s);
 void tweaks_set_radar_scale(float s);
 void tweaks_set_radar_bottom(int bottom);
 void tweaks_save(const char *key, const char *value);

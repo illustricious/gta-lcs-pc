@@ -59,12 +59,12 @@ static int input_root(void) { return host_active() && root_drawn && plat.frames-
  * stay native. */
 enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE, K_ACT, K_ACT_CLEAR, K_MAP };
 typedef struct Row { const char *label; int kind; int arg; } Row;
-enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_FOV, S_COUNT };
+enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_FOV, S_CAMDIST, S_COUNT };
 static const Row boot_rows[] = {{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row continue_rows[] = {{"CONTINUE",K_PAGE,14},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row pause_rows[] = {{"RESUME",K_RESUME,0},{"MAP",K_MAP,0},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"STATS",K_PAGE,1},{"BRIEF",K_PAGE,3},{"HELP",K_PAGE,62},{"EXIT GAME",K_PAGE,42}};
 static const Row settings_rows[] = {{"GRAPHICS",K_SUB,2},{"CONTROLS",K_SUB,3},{"GAMEPLAY",K_PAGE,68},{"AUDIO",K_PAGE,5},{"DISPLAY",K_PAGE,6},{"LANGUAGE",K_PAGE,7},{"BACK",K_BACK,0}};
-static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"FIELD OF VIEW",K_VALUE,S_FOV},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
+static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"FIELD OF VIEW",K_VALUE,S_FOV},{"CAMERA DISTANCE",K_VALUE,S_CAMDIST},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
 enum { C_LOOK = 20, C_SENS, C_MOUSE0 /* 22..24 */ };
 /* button ids match main.c: A B X Y START BACK L1 R1 UP DOWN LEFT RIGHT L3 R3 */
 static const char *button_names[14] = {"BUTTON A","BUTTON B","BUTTON X","BUTTON Y","START","SELECT","L1","R1","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","L3","R3"};
@@ -83,13 +83,13 @@ static const Row foot_rows[] = {
     {"SPRINT",K_ACT,ACT(0,4,0)},{"JUMP",K_ACT,ACT(0,5,0)},{"ENTER VEHICLE",K_ACT,ACT(0,3,0)},{"ATTACK",K_ACT,ACT(0,6,0)},
     {"NEXT WEAPON",K_ACT,ACT(0,7,0)},{"PREVIOUS WEAPON",K_ACT,ACT(0,8,0)},{"PICK UP",K_ACT,ACT(0,9,0)},
     {"LOOK BEHIND",K_ACT,ACT(0,10,0)},{"MOVE FORWARD",K_ACT,ACT(0,12,0)},{"MOVE BACK",K_ACT,ACT(0,12,1)},
-    {"MOVE LEFT",K_ACT,ACT(0,11,0)},{"MOVE RIGHT",K_ACT,ACT(0,11,1)},{"CLEAR ALL",K_ACT_CLEAR,0},{"BACK",K_BACK,0}};
+    {"MOVE LEFT",K_ACT,ACT(0,11,0)},{"MOVE RIGHT",K_ACT,ACT(0,11,1)},{"RESET ALL",K_ACT_CLEAR,0},{"BACK",K_BACK,0}};
 static const Row car_rows[] = {
     {"ACCELERATE",K_ACT,ACT(1,0,0)},{"BRAKE / REVERSE",K_ACT,ACT(1,1,0)},{"HANDBRAKE",K_ACT,ACT(1,2,0)},
     {"STEER LEFT",K_ACT,ACT(1,13,0)},{"STEER RIGHT",K_ACT,ACT(1,13,1)},{"LEAN FORWARD",K_ACT,ACT(1,14,0)},
     {"LEAN BACK",K_ACT,ACT(1,14,1)},{"HORN",K_ACT,ACT(1,15,0)},{"LOOK LEFT",K_ACT,ACT(1,16,0)},
     {"LOOK RIGHT",K_ACT,ACT(1,17,0)},{"LOOK BEHIND",K_ACT,ACT(1,10,0)},{"EXIT VEHICLE",K_ACT,ACT(1,3,0)},{"DRIVE-BY",K_ACT,ACT(1,6,0)},{"NEXT WEAPON",K_ACT,ACT(1,7,0)},
-    {"PREVIOUS WEAPON",K_ACT,ACT(1,8,0)},{"CLEAR ALL",K_ACT_CLEAR,1},{"BACK",K_BACK,0}};
+    {"PREVIOUS WEAPON",K_ACT,ACT(1,8,0)},{"RESET ALL",K_ACT_CLEAR,1},{"BACK",K_BACK,0}};
 int host_act_get(int veh, int a, int slot);
 void host_act_set(int veh, int a, int slot, int k);
 void host_act_clear(int veh);
@@ -145,6 +145,11 @@ static void adjust(int row, int dir) {
         int i = nearest(res_opts, 5, tweaks_res_scale()) + dir; if (i < 0) i = 0; if (i > 4) i = 4;
         tweaks_set_res_scale(res_opts[i]);
     } else if (row == S_RADAR) tweaks_set_radar_bottom(!tweaks_radar_bottom());
+    else if (row == S_CAMDIST) {
+        static const float o[] = {0.8f, 0.9f, 1.0f, 1.1f, 1.2f, 1.4f, 1.6f};
+        int i = nearest(o, 7, tweaks_camera_distance()) + dir; if (i < 0) i = 0; if (i > 6) i = 6;
+        tweaks_set_camera_distance(o[i]);
+    }
     else if (row == S_FOV) {
         static const float o[] = {0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f};
         int i = nearest(o, 6, tweaks_fov_scale()) + dir; if (i < 0) i = 0; if (i > 5) i = 5;
@@ -174,6 +179,7 @@ static void value_text(int row, char *o, size_t n) {
     case S_RES: { float r = tweaks_res_scale(); if (r <= 0) snprintf(o, n, "AUTO"); else snprintf(o, n, "%dX%d", ((int)(plat.width*r+.5f))&~1, ((int)(plat.height*r+.5f))&~1); break; }
     case S_RADAR: snprintf(o, n, "%s", tweaks_radar_bottom() ? "BOTTOM" : "TOP"); break;
     case S_RADAR_SIZE: snprintf(o, n, "%d%%", (int)(tweaks_radar_scale() * 100.0f + 0.5f)); break;
+    case S_CAMDIST: snprintf(o, n, "%d%%", (int)(tweaks_camera_distance() * 100.0f + 0.5f)); break;
     case S_FOV: snprintf(o, n, "%d%%", (int)(tweaks_fov_scale() * 100.0f + 0.5f)); break;
     case S_MODE: snprintf(o, n, "%s", plat.display_mode == 0 ? "WINDOWED" : plat.display_mode == 2 ? "EXCLUSIVE" : "BORDERLESS"); break;
     case S_FOCUS: snprintf(o, n, "%s", plat.pause_on_focus_loss ? "ON" : "OFF"); break;

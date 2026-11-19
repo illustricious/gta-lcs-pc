@@ -26,6 +26,7 @@ typedef struct Settings {
     float res_scale;     /* internal resolution scale; 0 = the engine's own per-device value */
     float radar_scale;   /* radar size factor (Rust CHud::GetRadarSize*) */
     float fov_scale;     /* field of view factor (Rust CDraw::SetFOV) */
+    float camera_distance; /* on-foot camera distance factor (CCam::Process_FollowPed_SA parameter table) */
     int touch_controls;  /* draw the Android on-screen controls */
 } Settings;
 static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f};
@@ -52,6 +53,8 @@ static const char *DEFAULT_INI =
     "radar_scale=1.0\n"
     "; field of view: 0.9 .. 1.4 (zoomed views keep theirs)\n"
     "fov_scale=1.0\n"
+    "; on-foot camera distance: 0.8 .. 1.6\n"
+    "camera_distance=1.0\n"
     "; Android on-screen controls: 0 = hidden (keyboard, mouse, gamepad), 1 = shown\n"
     "touch_controls=0\n"
     "; per-action keys, separate on foot (foot_) and in vehicles (car_); unset = the gamepad mapping.\n"
@@ -87,6 +90,7 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strcmp(line, "radar_margin")) cfg.radar_margin = (float)atof(val);
     else if (!strcmp(line, "radar_scale")) cfg.radar_scale = (float)atof(val);
     else if (!strcmp(line, "fov_scale")) cfg.fov_scale = (float)atof(val);
+    else if (!strcmp(line, "camera_distance")) cfg.camera_distance = (float)atof(val);
     else if (!strcmp(line, "touch_controls")) cfg.touch_controls = atoi(val);
     else if (!strcmp(line, "draw_distance")) cfg.draw_distance = (float)atof(val);
     else if (!strcmp(line, "res_scale")) cfg.res_scale = (float)atof(val);
@@ -160,6 +164,26 @@ void tweaks_set_res_scale(float s) {
 int tweaks_radar_bottom(void) { return cfg.radar_bottom; }
 float tweaks_radar_scale(void) { return cfg.radar_scale; }
 int tweaks_touch_controls(void) { return cfg.touch_controls; }
+float tweaks_camera_distance(void) { return cfg.camera_distance > 0 ? cfg.camera_distance : 1.0f; }
+void tweaks_set_camera_distance(float s) {
+    cfg.camera_distance = s < 0.8f ? 0.8f : s > 1.6f ? 1.6f : s;
+    char v[32]; snprintf(v, sizeof v, "%.2f", cfg.camera_distance); tweaks_save("camera_distance", v);
+}
+/* CCam::Process_FollowPed_SA reads its distances from a table of three 0x3c-byte entries (GOT +0x468). Fields 1, 3
+ * and 4 are the follow distances: scale them from the values the game starts with. */
+static void apply_camera_distance(void) {
+    static float base[45]; static int have;
+    uint64_t t = M64(G_BASE + 0x7f9468);
+    if (t < G_BASE || t >= G_BASE + 0x100000000ull) return;
+    if (!have) {
+        for (int i = 0; i < 45; i++) base[i] = MF32(t + i * 4);
+        if (!(base[1] > 0.5f && base[1] < 10.0f && base[4] > base[1])) return; /* not the table we know */
+        have = 1;
+    }
+    float k = tweaks_camera_distance();
+    static const int fields[] = {1, 3, 4};
+    for (int e = 0; e < 3; e++) for (int f = 0; f < 3; f++) MF32(t + e * 60 + fields[f] * 4) = base[e * 15 + fields[f]] * k;
+}
 float tweaks_fov_scale(void) { return cfg.fov_scale > 0 ? cfg.fov_scale : 1.0f; }
 void tweaks_set_fov_scale(float s) {
     cfg.fov_scale = s < 0.8f ? 0.8f : s > 1.5f ? 1.5f : s;
@@ -384,6 +408,7 @@ void tweaks_apply(CPU *c) {
         lcs_set_radar(cfg.radar_bottom, cfg.radar_margin, cfg.radar_scale);
         void lcs_set_fov_scale(float scale);
         lcs_set_fov_scale(cfg.fov_scale > 0 ? cfg.fov_scale : 1.0f);
+        apply_camera_distance();
         void lcs_radar_layout(void); lcs_radar_layout();
     }
     scale_draw_distance();

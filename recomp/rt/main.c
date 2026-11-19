@@ -133,6 +133,24 @@ static signed char act_axis[2][ACT_COUNT];
 static int act_any;
 #define ACT_MOUSE 1000 /* + SDL mouse button */
 
+/* Default keys per context. Without them the keyboard only reached the game as pad buttons, the same in and out of a
+ * vehicle (Space = Cross: jump on foot, but brake/reverse in a car). lcs.ini lines override them; an empty value
+ * (foot_jump=) unbinds the action so the pad button applies again. */
+static const struct { unsigned char veh, act; int k0, k1; } act_defaults[] = {
+    {0, ACT_MOVE_X, SDL_SCANCODE_A, SDL_SCANCODE_D}, {0, ACT_MOVE_Y, SDL_SCANCODE_W, SDL_SCANCODE_S},
+    {0, ACT_SPRINT, SDL_SCANCODE_LSHIFT, 0}, {0, ACT_JUMP, SDL_SCANCODE_SPACE, 0}, {0, ACT_ENTER_EXIT, SDL_SCANCODE_F, 0},
+    {0, ACT_ATTACK, ACT_MOUSE + 1, 0}, {0, ACT_NEXT_WEAPON, SDL_SCANCODE_E, 0}, {0, ACT_PREV_WEAPON, SDL_SCANCODE_Q, 0},
+    {1, ACT_ACCELERATE, SDL_SCANCODE_W, 0}, {1, ACT_BRAKE, SDL_SCANCODE_S, 0}, {1, ACT_HANDBRAKE, SDL_SCANCODE_SPACE, 0},
+    {1, ACT_STEER_X, SDL_SCANCODE_A, SDL_SCANCODE_D}, {1, ACT_STEER_Y, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN},
+    {1, ACT_ENTER_EXIT, SDL_SCANCODE_F, 0}, {1, ACT_HORN, SDL_SCANCODE_H, 0}, {1, ACT_LOOK_LEFT, SDL_SCANCODE_Q, 0},
+    {1, ACT_LOOK_RIGHT, SDL_SCANCODE_E, 0}, {1, ACT_LOOK_BEHIND, SDL_SCANCODE_V, 0},
+};
+static void act_load_defaults(int veh) {
+    for (unsigned i = 0; i < sizeof act_defaults / sizeof act_defaults[0]; i++)
+        if (act_defaults[i].veh == veh) { act_key[veh][act_defaults[i].act][0] = act_defaults[i].k0; act_key[veh][act_defaults[i].act][1] = act_defaults[i].k1; }
+}
+void host_act_defaults_init(void) { act_load_defaults(0); act_load_defaults(1); act_any = 1; }
+
 static int act_parse_key(const char *s) {
     while (*s == ' ') s++;
     if (!SDL_strncasecmp(s, "mouse", 5)) return ACT_MOUSE + atoi(s + 5);
@@ -160,7 +178,19 @@ static int act_held(const bool *ks, int k) {
     if (k >= ACT_MOUSE) return (SDL_GetMouseState(0, 0) & SDL_BUTTON_MASK(k - ACT_MOUSE)) != 0;
     return k < SDL_SCANCODE_COUNT && ks[k];
 }
-static void actions_frame(const bool *ks) {
+/* tests: --key FROM TO NAME holds a key for the per-action bindings between two frames (counted here) */
+static struct { unsigned from, to; int sc; } kscript[16];
+static int nkscript;
+static void actions_frame(const bool *ks_in) {
+    static unsigned fno;
+    bool ks_local[SDL_SCANCODE_COUNT];
+    const bool *ks = ks_in;
+    fno++;
+    if (nkscript) {
+        memcpy(ks_local, ks_in, sizeof ks_local);
+        for (int i = 0; i < nkscript; i++) if (fno >= kscript[i].from && fno < kscript[i].to) ks_local[kscript[i].sc] = 1;
+        ks = ks_local;
+    }
     if (!act_any) return;
     for (int v = 0; v < 2; v++)
         for (int a = 0; a < ACT_COUNT; a++) {
@@ -202,8 +232,11 @@ void host_act_set(int veh, int a, int slot, int k) {
     act_save(veh, a);
     act_recount();
 }
+/* RESET ALL on a key page: back to the default keys of that context */
 void host_act_clear(int veh) {
-    for (int a = 0; a < ACT_COUNT; a++) { act_key[veh != 0][a][0] = act_key[veh != 0][a][1] = 0; act_save(veh != 0, a); }
+    for (int a = 0; a < ACT_COUNT; a++) act_key[veh != 0][a][0] = act_key[veh != 0][a][1] = 0;
+    act_load_defaults(veh != 0);
+    for (int a = 0; a < ACT_COUNT; a++) act_save(veh != 0, a);
     act_recount();
 }
 int host_action(int a, int vehicle) {
@@ -600,6 +633,7 @@ int main(int argc, char **argv) {
     plat.fps_cap = 60;
     find_layout();
     open_log();
+    host_act_defaults_init();
     tweaks_load(installed ? user_dir : root);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--verbose")) rt_verbose++;
@@ -618,6 +652,10 @@ int main(int argc, char **argv) {
             extern float tweaks_teleport[4]; extern int tweaks_teleport_pending;
             for (int k = 0; k < 4; k++) tweaks_teleport[k] = (float)atof(argv[i + 1 + k]);
             tweaks_teleport_pending = 1; i += 4;
+        }
+        else if (!strcmp(argv[i], "--key") && i + 3 < argc && nkscript < 16) {
+            kscript[nkscript].from = (unsigned)atoi(argv[i + 1]); kscript[nkscript].to = (unsigned)atoi(argv[i + 2]);
+            kscript[nkscript++].sc = (int)SDL_GetScancodeFromName(argv[i + 3]); i += 3;
         }
         else if (!strcmp(argv[i], "--axis") && i + 3 < argc && nscript < 64) {
             script[nscript].frame = (unsigned)atoi(argv[i + 1]); script[nscript].axis = atoi(argv[i + 2]) % 6;
