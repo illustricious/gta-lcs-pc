@@ -18,7 +18,7 @@
 #define MAP_SHIFT 0.09f /* map centre shift, fraction of screen width: the map screen's own legend column (37% of its width) then ends exactly under the left panel */
 static void strip_capture(void);
 static int map_active;
-static int draw_pause_map(CPU *c);
+static int draw_pause_map(CPU *c, int render);
 static void end_pause_map(CPU *c);
 static unsigned first_menu_frame;
 unsigned frontend_first_frame(void) { return first_menu_frame; }
@@ -57,12 +57,12 @@ static int input_root(void) { return host_active() && root_drawn && plat.frames-
  * the engine's own aScreens table and driven through the native selection + A button, so each action
  * (save, load, new game, ...) runs the original code. Help/Brief/Stats and the leaf settings pages
  * stay native. */
-enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE, K_ACT, K_ACT_CLEAR };
+enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE, K_ACT, K_ACT_CLEAR, K_MAP };
 typedef struct Row { const char *label; int kind; int arg; } Row;
 enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_COUNT };
 static const Row boot_rows[] = {{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row continue_rows[] = {{"CONTINUE",K_PAGE,14},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
-static const Row pause_rows[] = {{"RESUME",K_RESUME,0},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"STATS",K_PAGE,1},{"BRIEF",K_PAGE,3},{"HELP",K_PAGE,62},{"EXIT GAME",K_PAGE,42}};
+static const Row pause_rows[] = {{"RESUME",K_RESUME,0},{"MAP",K_MAP,0},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"STATS",K_PAGE,1},{"BRIEF",K_PAGE,3},{"HELP",K_PAGE,62},{"EXIT GAME",K_PAGE,42}};
 static const Row settings_rows[] = {{"GRAPHICS",K_SUB,2},{"CONTROLS",K_SUB,3},{"GAMEPLAY",K_PAGE,68},{"AUDIO",K_PAGE,5},{"DISPLAY",K_PAGE,6},{"LANGUAGE",K_PAGE,7},{"BACK",K_BACK,0}};
 static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
 enum { C_LOOK = 20, C_SENS, C_MOUSE0 /* 22..24 */ };
@@ -368,6 +368,45 @@ static void dump_screens(CPU *c) {
         }
     }
 }
+static int root_rows(int ctx, const Row **out) {
+    *out = ctx == 52 ? pause_rows : ctx == 69 ? continue_rows : boot_rows;
+    return ctx == 52 ? (int)(sizeof pause_rows / sizeof pause_rows[0]) : ctx == 69 ? 4 : 3;
+}
+/* Row of the root list that opens `kind`/`arg` (SETTINGS, GAME), so Back lands on it. */
+static int root_index(int kind, int arg) {
+    const Row *r; int n = root_rows(root_ctx, &r);
+    for (int i = 0; i < n; i++) if (r[i].kind == kind && r[i].arg == arg) return i;
+    return 0;
+}
+static int cur_rows(const Row **out);
+/* Two-pane layout: a view below the root shows its parent list on the left (the row that opened it marked) and its
+ * own rows on the right. Returns 0 at the root, where the left list is the current one. */
+static int parent_rows(const Row **out, int *sel) {
+    int s = MS32(MENU + SCREEN);
+    if (s == 41 && (sub == 2 || sub == 3)) { *out = settings_rows; *sel = sub - 2; return 7; }
+    if (s == 41 && (sub == 4 || sub == 5)) { *out = controls_rows; *sel = sub - 4; return CONTROLS_COUNT; }
+    if (engine_page(s)) { *out = settings_rows; *sel = s == 68 ? 2 : s == 5 ? 3 : s == 6 ? 4 : 5; return 7; }
+    if (s == 41) { *sel = root_index(K_PAGE, 41); return root_rows(root_ctx, out); }
+    if (s == 2) { *sel = root_index(K_PAGE, 2); return root_rows(root_ctx, out); }
+    return 0;
+}
+static int child_view(void) { const Row *r; int sel; return parent_rows(&r, &sel) > 0; }
+/* Rows a highlighted root/parent row would open, for the right pane preview (host lists only). */
+static int preview_rows(const Row *x, const Row **out) {
+    if (x->kind == K_PAGE && x->arg == 41) { *out = settings_rows; return 7; }
+    if (x->kind == K_SUB && x->arg == 2) { *out = graphics_rows; return (int)(sizeof graphics_rows / sizeof graphics_rows[0]); }
+    if (x->kind == K_SUB && x->arg == 3) { *out = controls_rows; return CONTROLS_COUNT; }
+    if (x->kind == K_SUB && x->arg == 4) { *out = foot_rows; return (int)(sizeof foot_rows / sizeof foot_rows[0]); }
+    if (x->kind == K_SUB && x->arg == 5) { *out = car_rows; return (int)(sizeof car_rows / sizeof car_rows[0]); }
+    return 0;
+}
+/* x range of the interactive list in 640x448 menu space */
+static float list_x0(void) { return child_view() ? PANEL + 21.0f : 21.0f; }
+static float list_x1(void) { return child_view() ? 640.0f - 18.0f : PANEL - 18.0f; }
+static int map_row_selected(void) {
+    const Row *r; int n = cur_rows(&r);
+    return root_ctx == 52 && root_menu() && selection < n && r[selection].kind == K_MAP;
+}
 static int cur_rows(const Row **out) {
     int s = MS32(MENU + SCREEN);
     if (s == 2) { *out = game_rows; return game_count; }
@@ -377,8 +416,7 @@ static int cur_rows(const Row **out) {
     if (s == 41 && sub == 5) { *out = car_rows; return (int)(sizeof car_rows / sizeof car_rows[0]); }
     if (s == 41 && sub == 2) { *out = graphics_rows; return (int)(sizeof graphics_rows / sizeof graphics_rows[0]); }
     if (s == 41) { *out = settings_rows; return 7; }
-    *out = s == 52 ? pause_rows : s == 69 ? continue_rows : boot_rows;
-    return s == 52 ? 7 : s == 69 ? 4 : 3;
+    return root_rows(s, out);
 }
 static int rows(void) { const Row *r; return cur_rows(&r); }
 static float row_top(void) { return rows() >= 5 ? 168.0f : 190.0f; }
@@ -419,14 +457,18 @@ static void go_back(CPU *c) {
     else if (capture_act >= 0) capture_act = -1;
     else if (sub >= 4) set_sub(3, sub - 4); /* back to CONTROLS, on the row that opened the page */
     else if (sub) set_sub(0, sub == 2 ? 0 : 1);
-    else if (MS32(MENU + SCREEN) == 41) { navigate(c, root_ctx); selection = 1; last_screen = -1; keep_key = view_key(); }
+    else if (MS32(MENU + SCREEN) == 41) { navigate(c, root_ctx); selection = root_index(K_PAGE, 41); last_screen = -1; keep_key = view_key(); }
     else if (engine_page(MS32(MENU + SCREEN))) { /* back to SETTINGS, on the row that opened this page */
         int from = MS32(MENU + SCREEN);
         { CPU keep = *c; rt_invoke(c, G + 0x527304, 1, MENU); *c = keep; } /* CMenuManager::SaveSettings, as the native Back does */
         navigate(c, 41);
         selection = from == 68 ? 2 : from == 5 ? 3 : from == 6 ? 4 : 5; last_screen = view_key(); keep_key = view_key();
     }
-    else if (MS32(MENU + SCREEN) == 2) native_back(c);
+    else if (MS32(MENU + SCREEN) == 2) { /* GAME: straight back to the root list (the native Back was ignored after
+                                          * visiting Load/Delete, which left the player stuck on this page) */
+        CPU keep = *c; end_pause_map(c); *c = keep;
+        navigate(c, root_ctx); selection = root_index(K_PAGE, 2); last_screen = -1; keep_key = view_key();
+    }
     ui_sound(SND_BACK);
 }
 static void activate(CPU *c) {
@@ -449,6 +491,7 @@ static void activate(CPU *c) {
     case K_BIND: capture_btn = x->arg; break;
     case K_ACT: capture_act = x->arg; break;
     case K_ACT_CLEAR: host_act_clear(x->arg); break;
+    case K_MAP: break;
     case K_RESET: {
         host_bind_reset(); char v[32], k[32];
         for (int i = 0; i < 14; i++) { snprintf(k, sizeof k, "bind_%d", i); snprintf(v, sizeof v, "%d", host_bind_get(i, 0)); tweaks_save(k, v); }
@@ -481,6 +524,10 @@ int frontend_button(CPU *c, int b, int down) {
     else if (is_value && (b == 10 || b == 11)) {
         if (r[selection].kind == K_ENGINE) engine_adjust(c, r[selection].arg, b == 11 ? 1 : -1); else adjust(r[selection].arg, b == 11 ? 1 : -1);
         ui_sound(SND_ADJUST);
+    }
+    else if (b == 10 && child_view()) go_back(c); /* left: back to the parent list */
+    else if (b == 11 && selection < n && (r[selection].kind == K_SUB || (r[selection].kind == K_PAGE && r[selection].arg != 42))) {
+        ui_sound(SND_SELECT); activate(c); /* right: open the submenu */
     }
     else if (b == 8 || b == 10) { selection = (selection + n - 1) % n; ui_sound(SND_MOVE); }
     else if (b == 9 || b == 11) { selection = (selection + 1) % n; ui_sound(SND_MOVE); }
@@ -540,7 +587,7 @@ void frontend_hover(CPU *c, float x, float y) {
     if (MS32(MENU + SCREEN) == 2) build_game_rows(c);
     float dy = y * 448.0f - row_top();
     int row = (int)(dy / row_step()) + scroll_top;
-    if (x * 640.0f >= 21.0f && x * 640.0f <= PANEL - 18.0f && dy >= 0 && row >= scroll_top && row < scroll_top + VISIBLE_ROWS && row < rows() &&
+    if (x * 640.0f >= list_x0() && x * 640.0f <= list_x1() && dy >= 0 && row >= scroll_top && row < scroll_top + VISIBLE_ROWS && row < rows() &&
         dy - (row - scroll_top) * row_step() <= row_step() - 4 && row != selection) {
         selection = row; ui_sound(SND_MOVE);
     }
@@ -548,7 +595,7 @@ void frontend_hover(CPU *c, float x, float y) {
 int frontend_wheel(CPU *c, float dy) {
     (void)c;
     if (!input_root() || dy == 0) return 0;
-    if (map_active && root_ctx == 52) {
+    if (map_active && map_row_selected()) {
         uint64_t rm = M64(G + 0xa44270);
         if (rm) { /* zoom is 1..3 (GetZoomPercentage = (zoom - 1) / 2); +0x88 marks the map dirty */
             float z = MF32(rm + 0x74) + (dy > 0 ? 0.25f : -0.25f);
@@ -565,14 +612,14 @@ int frontend_wheel(CPU *c, float dy) {
 }
 int frontend_touch(CPU *c, int phase, float x, float y) {
     static int map_touch;
-    if (phase == 0 && input_root() && map_active && root_ctx == 52 && x * 640.0f > PANEL) map_touch = 1;
+    if (phase == 0 && input_root() && map_active && map_row_selected() && x * 640.0f > PANEL) map_touch = 1;
     if (map_touch) { if (phase == 2) map_touch = 0; return 0; } /* drag on the map pans it (engine touch input) */
     if (!input_root() && touch_row == -1) return 0;
     sync_selection();
     if (MS32(MENU + SCREEN) == 2) build_game_rows(c);
     float dy = y * 448.0f - row_top();
     int row = (int)(dy / row_step()) + scroll_top;
-    int hit = input_root() && x >= 21.0f/640 && x <= (PANEL-18.0f)/640 && dy >= 0 && row >= scroll_top && row < scroll_top + VISIBLE_ROWS &&
+    int hit = input_root() && x * 640.0f >= list_x0() && x * 640.0f <= list_x1() && dy >= 0 && row >= scroll_top && row < scroll_top + VISIBLE_ROWS &&
               row < rows() && dy - (row - scroll_top) * row_step() <= row_step()-4;
     if (phase == 0) { touch_row = hit ? row : -2; if (hit) { if (selection != row) ui_sound(SND_MOVE); selection = row; } }
     else if (phase == 1 && hit && touch_row >= 0) selection = row;
@@ -650,6 +697,49 @@ static void patch_title_text(CPU *c) {
 }
 /* Public guest entry is supplied by this host wrapper; the lifter preserves
  * the original implementation for every screen outside the redesigned root. */
+/* One menu list. x0 = 0 for the left pane, PANEL for the right pane; `live` lists take input (values, captures,
+ * scroll bar), the other pane's list is shown dimmed. sel = -1 marks no row. */
+static void draw_list(CPU *c, const Row *items, int count, int sel, int top, float x0, int live) {
+    float lx = x0 + 21.0f, width = (x0 > 0 ? 640.0f - PANEL : PANEL) - 39.0f, vx = x0 + VALUE_X;
+    if (x0 > 0) rect(c, PANEL + 2, 0, 640 - PANEL - 2, 448, 0xff161616); /* the right pane: a plain panel under the list */
+    int last = top + VISIBLE_ROWS < count ? top + VISIBLE_ROWS : count;
+    for (int i = top; i < last; i++) {
+        float y = row_top() + (i - top) * row_step(), h = row_step() - 5;
+        if (i == sel) {
+            /* native-style highlight: a white band that fades out to the right, with dark red text */
+            float solid = width * 0.55f;
+            unsigned band = live ? 0xffffffff : 0xff7a7a7a;
+            rect(c, lx, y, solid, h, band);
+            hgradient(c, lx + solid, y, width - solid, h, band, band & 0x00ffffff);
+            rect(c, lx, y, 3, h, 0xff000099);
+        }
+        unsigned col = i == sel ? 0xff2424a7 : live ? 0xffffffff : 0xff9a9a9a;
+        float ts = count > 4 ? .60f : .77f, ty = y + (count > 4 ? 4 : 8);
+        if (i == sel) drop_color(c, 0x00000000); /* native highlight text has no shadow */
+        text(c, items[i].label, lx + 12, ty, ts, col);
+        if (i == sel) drop_color(c, 0xff000000);
+        if (!live && x0 == 0) continue; /* parent list on the left: labels only */
+        char val[48] = "", shown[64];
+        int is_sel = live && i == sel;
+        if (items[i].kind == K_VALUE) { value_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, is_sel ? "< %s >" : "%s", val); }
+        else if (live && items[i].kind == K_ENGINE && eng_slider[i] >= 0) { /* engine slider: a bar in the value column */
+            float f = eng_slider[i] > 1 ? 1 : eng_slider[i];
+            rect(c, vx, y + 7, 80, 7, 0xff3a3a3a); rect(c, vx, y + 7, 80 * f, 7, is_sel ? 0xff000099 : 0xffd2d2d2);
+            shown[0] = 0;
+        }
+        else if (live && items[i].kind == K_ENGINE && eng_value[i][0]) snprintf(shown, sizeof shown, is_sel ? "< %s >" : "%s", eng_value[i]);
+        else if (items[i].kind == K_BIND) { bind_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, "%s", val); }
+        else if (items[i].kind == K_ACT) { act_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, "%s", val); }
+        else shown[0] = 0;
+        int capturing = live && ((items[i].kind == K_BIND && capture_btn == items[i].arg) || (items[i].kind == K_ACT && capture_act == items[i].arg));
+        if (shown[0]) text(c, shown, vx, ty, .46f, (is_sel || capturing) ? 0xff2424a7 : live ? 0xffd2d2d2 : 0xff8a8a8a);
+    }
+    if (live && count > VISIBLE_ROWS) { /* scroll bar */
+        float st = row_top(), span = VISIBLE_ROWS * row_step() - 5, bx = x0 + width + 25.0f;
+        rect(c, bx, st, 3, span, 0xff2e2e2e);
+        rect(c, bx, st + span * top / count, 3, span * VISIBLE_ROWS / count, 0xff000099);
+    }
+}
 void G_527bf4(CPU *c) {
     /* host_native_button runs guest code on this CPU: keep x0 (the menu) and the rest for the original draw below */
     CPU entry = *c;
@@ -691,8 +781,11 @@ void G_527bf4(CPU *c) {
     sprite(c, m ? M64(m + 0x178) : 0, PANEL - 17, 0, 640 - PANEL + 17, 448, 0xffffffff);
     float artwork_h = (406.0f/640.0f) * plat.width / plat.height * 448.0f / 2.14f;
     if (artwork_h > 448) artwork_h = 448;
-    if (root_ctx != 52) sprite(c, M64(MENU + 0x140), PANEL + 10, (448-artwork_h)*.5f, 350, artwork_h * 350.0f / 406.0f, 0xffffffff);
-    if (root_ctx == 52 && draw_pause_map(c)) {
+    int show_map = map_row_selected();
+    if (!show_map) sprite(c, M64(MENU + 0x140), PANEL + 10, (448-artwork_h)*.5f, 350, artwork_h * 350.0f / 406.0f, 0xffffffff);
+    /* In the pause menu the map mode stays on (it also replaces the native page's gamepad icons with the map's,
+     * which strip_capture hides); the map itself is drawn only while the MAP row is highlighted. */
+    if (root_ctx == 52 && draw_pause_map(c, show_map)) {
         strip_capture(); /* the map screen's gamepad hints (queued text and icons) land on the bottom edge: keep what is under them */
         call(c, 0x476f1c); /* the map's legend text is queued: flush it now so the panel can cover it */
     }
@@ -710,38 +803,15 @@ void G_527bf4(CPU *c) {
     const Row *items; int count = cur_rows(&items);
     int has_value = selection < count && (items[selection].kind == K_VALUE || items[selection].kind == K_ENGINE);
     int is_bind = selection < count && (items[selection].kind == K_BIND || items[selection].kind == K_ACT);
-    int last = scroll_top + VISIBLE_ROWS < count ? scroll_top + VISIBLE_ROWS : count;
-    for (int i = scroll_top; i < last; i++) {
-        float y = row_top() + (i - scroll_top) * row_step(), h = row_step()-5;
-        if (i == selection) {
-            /* native-style highlight: a white band that fades out to the right, with dark red text */
-            float bw = PANEL - 39, solid = bw * 0.55f;
-            rect(c, 21, y, solid, h, 0xffffffff);
-            hgradient(c, 21 + solid, y, bw - solid, h, 0xffffffff, 0x00ffffff);
-            rect(c, 21, y, 3, h, 0xff000099);
-        }
-        unsigned col = i == selection ? 0xff2424a7 : 0xffffffff;
-        float ts = count > 4 ? .60f : .77f, ty = y + (count > 4 ? 4 : 8);
-        if (i == selection) drop_color(c, 0x00000000); /* native highlight text has no shadow */
-        text(c, items[i].label, 33, ty, ts, col);
-        if (i == selection) drop_color(c, 0xff000000);
-        char val[48] = "", shown[64];
-        if (items[i].kind == K_VALUE) { value_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, i == selection ? "< %s >" : "%s", val); }
-        else if (items[i].kind == K_ENGINE && eng_slider[i] >= 0) { /* engine slider: a bar in the value column */
-            float f = eng_slider[i] > 1 ? 1 : eng_slider[i];
-            rect(c, VALUE_X, y + 7, 80, 7, 0xff3a3a3a); rect(c, VALUE_X, y + 7, 80 * f, 7, i == selection ? 0xff000099 : 0xffd2d2d2);
-            shown[0] = 0;
-        }
-        else if (items[i].kind == K_ENGINE && eng_value[i][0]) snprintf(shown, sizeof shown, i == selection ? "< %s >" : "%s", eng_value[i]);
-        else if (items[i].kind == K_BIND) { bind_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, "%s", val); }
-        else if (items[i].kind == K_ACT) { act_text(items[i].arg, val, sizeof val); snprintf(shown, sizeof shown, "%s", val); }
-        else shown[0] = 0;
-        if (shown[0]) text(c, shown, VALUE_X, ty, .46f, (i == selection || (items[i].kind == K_BIND && capture_btn == items[i].arg) || (items[i].kind == K_ACT && capture_act == items[i].arg)) ? 0xff2424a7 : 0xffd2d2d2);
-    }
-    if (count > VISIBLE_ROWS) { /* scroll bar */
-        float top = row_top(), span = VISIBLE_ROWS * row_step() - 5;
-        rect(c, PANEL - 14, top, 3, span, 0xff2e2e2e);
-        rect(c, PANEL - 14, top + span * scroll_top / count, 3, span * VISIBLE_ROWS / count, 0xff000099);
+    const Row *parent; int parent_sel = 0, parent_count = parent_rows(&parent, &parent_sel);
+    if (parent_count) {
+        /* left: the parent list with the row that opened this view; right: this view's rows and values */
+        draw_list(c, parent, parent_count, parent_sel, 0, 0.0f, 0);
+        draw_list(c, items, count, selection, scroll_top, PANEL, 1);
+    } else {
+        draw_list(c, items, count, selection, scroll_top, 0.0f, 1);
+        const Row *pre; int pn = selection < count ? preview_rows(&items[selection], &pre) : 0;
+        if (pn) draw_list(c, pre, pn, -1, 0, PANEL, 0); /* what the highlighted row opens */
     }
     int can_back = sub || screen == 2 || screen == 41 || engine_page(screen);
     float fy = 426.0f - 15.0f * (can_back ? 2 : 1);
@@ -750,6 +820,7 @@ void G_527bf4(CPU *c) {
     else if (capture_act >= 0) { text(c, "PRESS A KEY OR MOUSE BUTTON   DEL CLEAR   ESC CANCEL", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
     else if (has_value) { text(c, pad ? "D-PAD LEFT / RIGHT   CHANGE" : "LEFT / RIGHT   CHANGE", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
     else if (is_bind) { text(c, pad ? "A   REBIND KEY" : "ENTER   REBIND KEY", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
+    else if (show_map) { text(c, pad ? "RIGHT STICK   MOVE MAP" : "WHEEL ZOOM   DRAG MOVE", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
     else { text(c, pad ? "D-PAD   SELECT" : "UP / DOWN   SELECT", 26, fy, .40f, 0xffbfbfbf); fy += 15; }
     text(c, pad ? "A   CONFIRM" : "ENTER   CONFIRM", 26, fy, .40f, 0xffbfbfbf); fy += 15;
     if (can_back) text(c, pad ? "B   BACK" : "ESC   BACK", 26, fy, .40f, 0xffbfbfbf);
@@ -907,11 +978,12 @@ void frontend_present(void) {
  * right by rt_gl_dx; the opaque left panel is drawn afterwards and hides the part that spills over. */
 extern int rt_gl_dx;
 static int map_active;
-static int draw_pause_map(CPU *c) {
+static int draw_pause_map(CPU *c, int render) {
     uint64_t rm = M64(G + 0xa44270);
     if (!rm || !camera_init()) return 0;
     CPU keep = *c;
     if (!map_active) { rt_invoke(c, G + 0x54e59c, 1, rm); map_active = 1; if (rt_verbose) rt_log("frontend: pause map activated\n"); }
+    if (!render) { *c = keep; return 1; }
     int dx = (int)(plat.width * MAP_SHIFT);
     rt_gl_dx = dx;
     qViewport(dx, 0, plat.width, plat.height);

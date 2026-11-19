@@ -199,3 +199,15 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - The sector-level LOD swap (which buildings a cell's sector holds in detail) is still baked into the world data.
 - `--verbose` logs `diag: world meshes kept N, culled by size M` once a second (CalcScreenSize host hook).
 - Vehicle steering, lean, horn and look left/right/behind are Rust CPad ports with bindings (VEHICLE KEYS page).
+
+## Two-pane menu, MAP row, GAME back (19 Nov 2026)
+- Below the root, the left pane shows the parent list (the row that opened the view marked) and the right pane the
+  view's own rows and values (`parent_rows`, `draw_list`). At the root, the right pane previews what the highlighted
+  row opens (SETTINGS, GRAPHICS, CONTROLS, key pages) or shows the artwork.
+- Left goes back to the parent list, Right opens a submenu; mouse and touch hit the pane the list is in.
+- Pause menu: MAP is its own row. The map is drawn on the right while MAP is highlighted (wheel zoom, drag to move).
+  The map mode stays on in the pause menu even when not drawn: it swaps the native page's gamepad icons for the map's,
+  which `strip_capture` hides.
+- Back from GAME navigates straight to the root list. The native Back used before was ignored after visiting Load or
+  Delete, which left the title menu stuck on GAME.
+- Installer version 0.2.0.
