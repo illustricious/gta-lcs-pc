@@ -120,11 +120,13 @@ enum { B_A, B_B, B_X, B_Y, B_START, B_BACK, B_L1, B_R1, B_UP, B_DOWN, B_LEFT, B_
 /* Per-action bindings, separate on foot and in a vehicle. The Rust CPad ports (recomp/engine/src/pad.rs) ask
  * host_action() inside each action getter; an unbound action keeps the gamepad button the game expects.
  * lcs.ini: foot_<action>=<key> / car_<action>=<key>, keys by SDL name ("Left Shift", "W") or Mouse1..Mouse3;
- * move_x / move_y take two keys, "A,D". Must match `enum Act` in pad.rs. */
+ * move_x / move_y / steer_x / steer_y take two keys, "A,D". Must match `enum Act` in pad.rs. */
 enum { ACT_ACCELERATE, ACT_BRAKE, ACT_HANDBRAKE, ACT_ENTER_EXIT, ACT_SPRINT, ACT_JUMP, ACT_ATTACK, ACT_NEXT_WEAPON,
-       ACT_PREV_WEAPON, ACT_PICKUP, ACT_LOOK_BEHIND, ACT_MOVE_X, ACT_MOVE_Y, ACT_COUNT };
+       ACT_PREV_WEAPON, ACT_PICKUP, ACT_LOOK_BEHIND, ACT_MOVE_X, ACT_MOVE_Y, ACT_STEER_X, ACT_STEER_Y, ACT_HORN,
+       ACT_LOOK_LEFT, ACT_LOOK_RIGHT, ACT_COUNT };
 static const char *act_names[ACT_COUNT] = {"accelerate", "brake", "handbrake", "enter_exit", "sprint", "jump", "attack",
-                                           "next_weapon", "prev_weapon", "pickup", "look_behind", "move_x", "move_y"};
+                                           "next_weapon", "prev_weapon", "pickup", "look_behind", "move_x", "move_y",
+                                           "steer_x", "steer_y", "horn", "look_left", "look_right"};
 static int act_key[2][ACT_COUNT][2];  /* [vehicle][action]: key (axis: negative key), axis positive key */
 static unsigned char act_now[2][ACT_COUNT], act_prev[2][ACT_COUNT];
 static signed char act_axis[2][ACT_COUNT];

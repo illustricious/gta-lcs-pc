@@ -86,7 +86,9 @@ static const Row foot_rows[] = {
     {"MOVE LEFT",K_ACT,ACT(0,11,0)},{"MOVE RIGHT",K_ACT,ACT(0,11,1)},{"CLEAR ALL",K_ACT_CLEAR,0},{"BACK",K_BACK,0}};
 static const Row car_rows[] = {
     {"ACCELERATE",K_ACT,ACT(1,0,0)},{"BRAKE / REVERSE",K_ACT,ACT(1,1,0)},{"HANDBRAKE",K_ACT,ACT(1,2,0)},
-    {"EXIT VEHICLE",K_ACT,ACT(1,3,0)},{"DRIVE-BY",K_ACT,ACT(1,6,0)},{"NEXT WEAPON",K_ACT,ACT(1,7,0)},
+    {"STEER LEFT",K_ACT,ACT(1,13,0)},{"STEER RIGHT",K_ACT,ACT(1,13,1)},{"LEAN FORWARD",K_ACT,ACT(1,14,0)},
+    {"LEAN BACK",K_ACT,ACT(1,14,1)},{"HORN",K_ACT,ACT(1,15,0)},{"LOOK LEFT",K_ACT,ACT(1,16,0)},
+    {"LOOK RIGHT",K_ACT,ACT(1,17,0)},{"LOOK BEHIND",K_ACT,ACT(1,10,0)},{"EXIT VEHICLE",K_ACT,ACT(1,3,0)},{"DRIVE-BY",K_ACT,ACT(1,6,0)},{"NEXT WEAPON",K_ACT,ACT(1,7,0)},
     {"PREVIOUS WEAPON",K_ACT,ACT(1,8,0)},{"CLEAR ALL",K_ACT_CLEAR,1},{"BACK",K_BACK,0}};
 int host_act_get(int veh, int a, int slot);
 void host_act_set(int veh, int a, int slot, int k);

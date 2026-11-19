@@ -33,6 +33,11 @@ enum Act {
     LookBehind = 10,
     MoveX = 11,
     MoveY = 12,
+    SteerX = 13,
+    SteerY = 14,
+    Horn = 15,
+    LookLeft = 16,
+    LookRight = 17,
 }
 
 extern "C" {
@@ -351,4 +356,183 @@ extern "C" {
     fn G_346090_orig(c: *mut Cpu);
     fn G_346758_orig(c: *mut Cpu);
     fn G_345a20_orig(c: *mut Cpu);
+}
+
+const GOT_STEER_MODE: u64 = 0x7f9d88; // i32 touch steering mode (1 buttons, 2 slider widgets, 3 tilt)
+const GOT_PLAYERS: u64 = 0x7f9120; // CWorld::Players, 0x1a0 bytes each
+const GOT_PLAYER_INDEX: u64 = 0x7f9118; // u8 CWorld::PlayerInFocus
+const GOT_THE_CAMERA: u64 = 0x7f9190;
+
+#[inline]
+unsafe fn clamp16(v: f32) -> i32 {
+    (v as i32).clamp(-0x8000, 0x7fff)
+}
+
+/// int16 CPad::GetSteeringLeftRight(): touch steering first, then the stick (or a bound key pair); the
+/// value goes through the input delay buffer at +0x84 (drunk effect).
+#[no_mangle]
+pub unsafe extern "C" fn G_3452dc(c: *mut Cpu) {
+    let pad = (*c).x[0];
+    verify::port_regions(c, G_3452dc_orig, Ret::W0, &[(pad + 0x84, 2)], |c| {
+        if disabled(pad) {
+            c.set_w(0, 0);
+            return;
+        }
+        let layout = r64(got(GOT_HUD_LAYOUT));
+        let mut v: i32 = 0;
+        if r8(layout + 8) == 0 {
+            let mode = r32(got(GOT_STEER_MODE));
+            let flags = r32(pad + 0x7c);
+            v = match mode {
+                1 => if flags & 0x40000 != 0 { 0xff80 } else if flags & 0x80000 != 0 { 0x80 } else { 0 },
+                2 => {
+                    let dir = if flags & 0x80000 == 0 { 0.0 } else { 128.0 };
+                    let dir = if flags & 0x40000 == 0 { dir } else { -128.0 };
+                    let a = call(c, WIDGET_VALUE, &[layout, 0xa]).1;
+                    let b = call(c, WIDGET_VALUE, &[r64(got(GOT_HUD_LAYOUT)), 0xb]).1;
+                    let m = if a > b { a } else { b };
+                    clamp16(dir * crate::guest::fma(m, 0.5, 0.5))
+                }
+                3 if layout != 0 => clamp16(rf32(layout + 0x5a4) * 128.0),
+                _ => 0,
+            };
+        }
+        if v == 0 {
+            v = if let Some(x) = bound_axis(c, Act::SteerX) {
+                x
+            } else if touch_dpad() {
+                half(ri16(pad + 0x18) as i32 - ri16(pad + 0x16) as i32)
+            } else {
+                r16(pad + 2) as i32
+            };
+        }
+        let m = scheme(pad);
+        if m == 2 || m == 3 {
+            w16(pad + 0x84, v as u16);
+            if r16(pad + 0xa) != 0 {
+                c.set_w(0, 0);
+                return;
+            }
+        } else if m > 1 {
+            c.set_w(0, 0);
+            return;
+        } else {
+            w16(pad + 0x84, v as u16);
+        }
+        let slot = ri32(pad + 0x98) as i64 as u64;
+        c.set_w(0, r16(pad.wrapping_add(slot.wrapping_mul(2)) + 0x84) as u32);
+    });
+}
+
+/// int16 CPad::GetSteeringUpDown(): bike lean / aircraft pitch.
+#[no_mangle]
+pub unsafe extern "C" fn G_345490(c: *mut Cpu) {
+    verify::port(c, G_345490_orig, Ret::W0, |c| {
+        let pad = c.x[0];
+        if disabled(pad) {
+            c.set_w(0, 0);
+            return;
+        }
+        let layout = r64(got(GOT_HUD_LAYOUT));
+        let v: i32 = if r8(layout + 8) == 0 && r32(got(GOT_STEER_MODE)) != 0 {
+            if layout == 0 { 0 } else { clamp16(rf32(layout + 0x5a8) * 128.0) }
+        } else if let Some(y) = bound_axis(c, Act::SteerY) {
+            y
+        } else if touch_dpad() {
+            half(ri16(pad + 0x14) as i32 - ri16(pad + 0x12) as i32)
+        } else {
+            r16(pad + 4) as i32
+        };
+        let m = scheme(pad);
+        let out = if m < 2 { v } else if m > 3 || r16(pad + 0xa) != 0 { 0 } else { v };
+        c.set_w(0, out as u32);
+    });
+}
+
+/// bool CPad::GetHorn()
+#[no_mangle]
+pub unsafe extern "C" fn G_344ea0(c: *mut Cpu) {
+    verify::port(c, G_344ea0_orig, Ret::W0, |c| {
+        let pad = c.x[0];
+        let m = scheme(pad);
+        let v = if disabled(pad) || m > 3 {
+            false
+        } else {
+            // schemes 0 and 2 use d-pad down, 1 and 3 d-pad up (touch layout: its own buttons)
+            let off = match (m & 1 != 0, touch_dpad()) {
+                (false, false) => 0x14,
+                (false, true) => 0x1c,
+                (true, false) => 0x12,
+                (true, true) => 0x1a,
+            };
+            held(c, pad, off, Act::Horn) != 0
+        };
+        c.set_w(0, v as u32);
+    });
+}
+
+/// L2 / R2 for the vehicle look getters, or the bound look keys (look behind presses both).
+unsafe fn look_buttons(c: &mut Cpu, pad: u64) -> (bool, bool) {
+    let l = bound(c, Act::LookLeft);
+    let r = bound(c, Act::LookRight);
+    let b = bound(c, Act::LookBehind);
+    if l.is_none() && r.is_none() && b.is_none() {
+        return (r16(pad + 0xc) != 0, r16(pad + 0x10) != 0);
+    }
+    let on = |x: Option<(bool, bool)>| x.map_or(false, |s| s.0);
+    (on(l) || on(b), on(r) || on(b))
+}
+
+/// The vehicle look getters return false in first person inside a vehicle.
+unsafe fn look_allowed(pad: u64) -> bool {
+    if disabled(pad) {
+        return false;
+    }
+    let player = got(GOT_PLAYERS) + r8(got(GOT_PLAYER_INDEX)) as u64 * 0x1a0;
+    if r64(player + 8) != 0 {
+        let cam = got(GOT_THE_CAMERA);
+        if r16(cam + r8(cam + 0x8f) as u64 * 0x298 + 0x1bc) == 0x10 {
+            return false;
+        }
+    }
+    true
+}
+
+/// bool CPad::GetLookLeft()
+#[no_mangle]
+pub unsafe extern "C" fn G_3458c4(c: *mut Cpu) {
+    verify::port(c, G_3458c4_orig, Ret::W0, |c| {
+        let pad = c.x[0];
+        let v = look_allowed(pad) && { let (l, r) = look_buttons(c, pad); l && !r };
+        c.set_w(0, v as u32);
+    });
+}
+
+/// bool CPad::GetLookRight()
+#[no_mangle]
+pub unsafe extern "C" fn G_345938(c: *mut Cpu) {
+    verify::port(c, G_345938_orig, Ret::W0, |c| {
+        let pad = c.x[0];
+        let v = look_allowed(pad) && { let (l, r) = look_buttons(c, pad); r && !l };
+        c.set_w(0, v as u32);
+    });
+}
+
+/// bool CPad::GetLookBehindForCar()
+#[no_mangle]
+pub unsafe extern "C" fn G_3459ac(c: *mut Cpu) {
+    verify::port(c, G_3459ac_orig, Ret::W0, |c| {
+        let pad = c.x[0];
+        let v = look_allowed(pad) && { let (l, r) = look_buttons(c, pad); l && r };
+        c.set_w(0, v as u32);
+    });
+}
+
+extern "C" {
+    fn G_3452dc_orig(c: *mut Cpu);
+    fn G_345490_orig(c: *mut Cpu);
+    fn G_344ea0_orig(c: *mut Cpu);
+    fn G_3458c4_orig(c: *mut Cpu);
+    fn G_345938_orig(c: *mut Cpu);
+    fn G_3459ac_orig(c: *mut Cpu);
 }

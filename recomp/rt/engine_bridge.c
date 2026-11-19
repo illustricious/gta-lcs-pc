@@ -37,3 +37,16 @@ void engine_report(void) {
     lcs_engine_verify_counts(n);
     if (n[0]) rt_log("engine: verified %llu calls, %llu mismatches\n", (unsigned long long)n[0], (unsigned long long)n[1]);
 }
+
+/* CalcScreenSize (world mesh cull by screen size, cWorldStreamEx::DrawPrimitiveRef): counts for the
+ * verbose diagnostics, how many world meshes are kept and culled. */
+extern void G_563238_orig(CPU *c);
+static unsigned cull_kept, cull_dropped;
+void G_563238(CPU *c) {
+    G_563238_orig(c);
+    if (c->x[0] & 1) cull_kept++; else cull_dropped++;
+}
+void engine_cull_stats(unsigned *kept, unsigned *dropped) {
+    *kept = cull_kept; *dropped = cull_dropped;
+    cull_kept = cull_dropped = 0;
+}

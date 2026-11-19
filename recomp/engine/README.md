@@ -60,6 +60,12 @@ Set `LCS_RS_VERIFY=1` to check the ports.
 | `CPad::CycleWeaponRightJustDown` | 0x346090 | ✓ |
 | `CPad::CollectPickupJustDown` | 0x346758 | ✓ |
 | `CPad::GetLookBehindForPed` | 0x345a20 | ✓ |
+| `CPad::GetSteeringLeftRight` | 0x3452dc | ✓ |
+| `CPad::GetSteeringUpDown` | 0x345490 | ✓ |
+| `CPad::GetHorn` | 0x344ea0 | ✓ |
+| `CPad::GetLookLeft` | 0x3458c4 | ✓ |
+| `CPad::GetLookRight` | 0x345938 | ✓ |
+| `CPad::GetLookBehindForCar` | 0x3459ac | ✓ |
 | `CCamera::GetGameCamPosition` | 0x3135fc | ✓ |
 | `CCamera::Get_Just_Switched_Status` | 0x329e10 | ✓ |
 | `CCamera::GetPositionAlongSpline` | 0x329ee8 | ✓ |
@@ -91,7 +97,7 @@ Functions that write through a pointer are verified with `verify::port_mem`; fun
 
 Ports call other guest functions through `guest::call`, which saves and restores the CPU. ARM64 `fmadd`/`fmsub` map to `guest::fma`, a single-rounding FMA identical to the `fmaf` used by the recompiled C. `fsqrt` maps to `guest::sqrt`.
 
-The second verification run, after the HUD ports, covered over 1,000,000 calls with 0 mismatches. The run after CTimeCycle (title, load, safehouse interior with its extra colour, street) covered 2,071,130 calls with 0 mismatches. With the CPad and CCamera ports added: 3,275,492 calls, 0 mismatches.
+The second verification run, after the HUD ports, covered over 1,000,000 calls with 0 mismatches. The run after CTimeCycle (title, load, safehouse interior with its extra colour, street) covered 2,071,130 calls with 0 mismatches. With the CPad and CCamera ports added: 3,275,492 calls, 0 mismatches; with steering, horn and look: 2,514,255 calls, 0 mismatches.
 
 ## Per-action bindings (`pad.rs`)
 

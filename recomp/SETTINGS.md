@@ -183,6 +183,19 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - Menu: SETTINGS > CONTROLS > ON FOOT KEYS / VEHICLE KEYS. Enter (or A) then a key or mouse button binds the action,
   Delete clears it (back to the gamepad mapping), Esc cancels; CLEAR ALL resets the page. A key is unique within a
   context, so binding it removes it from the other action. Each change is saved to lcs.ini at once.
-- Not bound yet: vehicle steering, horn, camera look, targeting (their getters are still recompiled C).
+- Not bound yet: targeting and camera look on foot (their getters are still recompiled C).
 - 26 CCamera/CCam queries and setters are Rust ports (`camera.rs`); the camera modes (`CCam::Process_*`,
   `CCamera::Process`, `CamControl`) are still recompiled C.
+
+## World cull fade now follows draw distance; steering bindings (19 Nov 2026)
+- Building detail popping in comes largely from `cWorldStreamEx::DrawPrimitiveRef`: beyond MinDist every world
+  mesh whose screen size (`CalcScreenSize`, 0x563238) is under a threshold is faded out. The thresholds live in
+  `gDeviceDetailSettings` (+0x00 world, +0x34 model; three levels of {MinDist, Range, NearSize, FarSize}), copied
+  from the dv sources once at start-up, so scaling `dvWorldCullFadeSettings*` never reached them. This PC build ran
+  the Low level (MinDist 50, size 0.09). `scale_world_cull` in rt/tweaks.c now writes the working copies:
+  MinDist and Range x k^2, sizes / k^2 (k = draw_distance).
+- Measured at an open spot (1300, -50): draw_distance 1.0 kept 76,674 and culled 22,854 meshes per second;
+  2.0 and 3.0 culled none.
+- The sector-level LOD swap (which buildings a cell's sector holds in detail) is still baked into the world data.
+- `--verbose` logs `diag: world meshes kept N, culled by size M` once a second (CalcScreenSize host hook).
+- Vehicle steering, lean, horn and look left/right/behind are Rust CPad ports with bindings (VEHICLE KEYS page).

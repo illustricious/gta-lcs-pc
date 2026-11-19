@@ -50,7 +50,8 @@ static const char *DEFAULT_INI =
     "radar_scale=1.0\n"
     "; per-action keys, separate on foot (foot_) and in vehicles (car_); unset = the gamepad mapping.\n"
     "; actions: accelerate brake handbrake enter_exit sprint jump attack next_weapon prev_weapon pickup\n"
-    ";          look_behind move_x move_y (two keys: negative,positive). Keys by SDL name or Mouse1..Mouse3.\n"
+    ";          look_behind look_left look_right horn move_x move_y steer_x steer_y (axes: two keys, negative,positive)\n"
+    ";          Keys by SDL name or Mouse1..Mouse3. Also set from SETTINGS > CONTROLS > ON FOOT / VEHICLE KEYS.\n"
     "; examples: car_accelerate=W  car_brake=S  car_handbrake=Space  foot_sprint=Left Shift  foot_jump=Space\n"
     "\n"
     "; draw distance: 1.0 = original, up to 3.0 (vehicles, peds, small objects, far clip)\n"
@@ -192,6 +193,7 @@ static Scaled scaled[] = {
 
 #define MENU_APPLY_FLAG (G_BASE + 0x9ec538 + 0x266) /* makes DeferredApplySettings re-read the dv values */
 
+static void scale_world_cull(float k);
 static void scale_draw_distance(void) {
     float k = cfg.draw_distance < 1.0f ? 1.0f : cfg.draw_distance > 3.0f ? 3.0f : cfg.draw_distance;
     static float last_k = 1.0f;
@@ -218,6 +220,40 @@ static void scale_draw_distance(void) {
     }
     if (changed && k != last_k) M8(MENU_APPLY_FLAG) = 1;
     last_k = k;
+    scale_world_cull(k);
+}
+
+/* World and model cull fade. cWorldStreamEx::DrawPrimitiveRef drops (fading) every world mesh whose screen size is
+ * below a threshold beyond MinDist (CalcScreenSize): that is the building detail popping in. The engine copies
+ * the dvWorldCullFadeSettings* / dvModelCullFadeSettings* sources into gDeviceDetailSettings once at start-up
+ * (three detail levels of {MinDist, Range, NearSize, FarSize} at +0x00 world and +0x34 model), so the dv sources
+ * above have no effect on it; the working copies are scaled here instead: MinDist and Range by k^2, sizes by 1/k^2. */
+static void scale_world_cull(float k) {
+    static uint64_t dds; static float base[2][3][4], written[2][3][4]; static int ready; static float applied = -1;
+    if (!dds) { dds = rt_sym("gDeviceDetailSettings"); if (!dds) return; }
+    float k2 = k * k;
+    for (int t = 0; t < 2; t++)
+        for (int l = 0; l < 3; l++) {
+            uint64_t e = dds + (t ? 0x34 : 0) + l * 16;
+            for (int f = 0; f < 4; f++) {
+                float now = MF32(e + f * 4);
+                if (!ready || now != written[t][l][f]) { base[t][l][f] = now; applied = -1; }
+            }
+        }
+    if (!(base[0][0][0] > 0)) return; /* not initialised by the engine yet */
+    ready = 1;
+    if (applied == k2) return;
+    for (int t = 0; t < 2; t++)
+        for (int l = 0; l < 3; l++) {
+            uint64_t e = dds + (t ? 0x34 : 0) + l * 16;
+            written[t][l][0] = base[t][l][0] * k2;
+            written[t][l][1] = base[t][l][1] * k2;
+            written[t][l][2] = base[t][l][2] / k2;
+            written[t][l][3] = base[t][l][3] / k2;
+            for (int f = 0; f < 4; f++) MF32(e + f * 4) = written[t][l][f];
+        }
+    applied = k2;
+    if (rt_verbose) rt_log("tweak: world cull min dist %.0f -> %.0f, size %.3f -> %.4f\n", base[0][0][0], written[0][0][0], base[0][0][3], written[0][0][3]);
 }
 
 /* Internal resolution: the engine picks one of three dv_OffscreenResScale floats by graphics detail. */
@@ -279,6 +315,8 @@ static void timing_diag(void) {
                 if (info && (M16(info + 0x56) & 0x10)) big++;
             }
             rt_log("diag: render list %d entities, %d big-building LODs\n", n, big);
+            { void engine_cull_stats(unsigned *, unsigned *); unsigned k, d; engine_cull_stats(&k, &d);
+              rt_log("diag: world meshes kept %u, culled by size %u (last second)\n", k, d); }
         }
         {
             static int dumped;
