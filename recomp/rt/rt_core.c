@@ -68,7 +68,9 @@ void rt_fatal(const char *fmt, ...) {
     if (tls_cpu) dump_state(tls_cpu);
     fflush(stderr);
     if (rt_gui) { /* started from Explorer: there is no console to read the error from */
-        strncat(msg, "\n\nDetail: build\\lcs.log", sizeof msg - strlen(msg) - 1);
+        extern char rt_log_path[];
+        strncat(msg, "\n\nLog: ", sizeof msg - strlen(msg) - 1);
+        strncat(msg, rt_log_path[0] ? rt_log_path : "lcs.log", sizeof msg - strlen(msg) - 1);
         MessageBoxA(0, msg, "GTA: Liberty City Stories", MB_ICONERROR | MB_OK);
     }
     TerminateProcess(GetCurrentProcess(), 3);

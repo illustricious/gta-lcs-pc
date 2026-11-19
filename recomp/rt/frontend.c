@@ -59,12 +59,12 @@ static int input_root(void) { return host_active() && root_drawn && plat.frames-
  * stay native. */
 enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE, K_ACT, K_ACT_CLEAR, K_MAP };
 typedef struct Row { const char *label; int kind; int arg; } Row;
-enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_COUNT };
+enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_FOV, S_COUNT };
 static const Row boot_rows[] = {{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row continue_rows[] = {{"CONTINUE",K_PAGE,14},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row pause_rows[] = {{"RESUME",K_RESUME,0},{"MAP",K_MAP,0},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"STATS",K_PAGE,1},{"BRIEF",K_PAGE,3},{"HELP",K_PAGE,62},{"EXIT GAME",K_PAGE,42}};
 static const Row settings_rows[] = {{"GRAPHICS",K_SUB,2},{"CONTROLS",K_SUB,3},{"GAMEPLAY",K_PAGE,68},{"AUDIO",K_PAGE,5},{"DISPLAY",K_PAGE,6},{"LANGUAGE",K_PAGE,7},{"BACK",K_BACK,0}};
-static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
+static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"FIELD OF VIEW",K_VALUE,S_FOV},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
 enum { C_LOOK = 20, C_SENS, C_MOUSE0 /* 22..24 */ };
 /* button ids match main.c: A B X Y START BACK L1 R1 UP DOWN LEFT RIGHT L3 R3 */
 static const char *button_names[14] = {"BUTTON A","BUTTON B","BUTTON X","BUTTON Y","START","SELECT","L1","R1","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","L3","R3"};
@@ -145,6 +145,11 @@ static void adjust(int row, int dir) {
         int i = nearest(res_opts, 5, tweaks_res_scale()) + dir; if (i < 0) i = 0; if (i > 4) i = 4;
         tweaks_set_res_scale(res_opts[i]);
     } else if (row == S_RADAR) tweaks_set_radar_bottom(!tweaks_radar_bottom());
+    else if (row == S_FOV) {
+        static const float o[] = {0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f};
+        int i = nearest(o, 6, tweaks_fov_scale()) + dir; if (i < 0) i = 0; if (i > 5) i = 5;
+        tweaks_set_fov_scale(o[i]);
+    }
     else if (row == S_RADAR_SIZE) {
         static const float o[] = {0.75f, 0.85f, 1.0f, 1.15f, 1.3f, 1.5f};
         int i = nearest(o, 6, tweaks_radar_scale()) + dir; if (i < 0) i = 0; if (i > 5) i = 5;
@@ -169,6 +174,7 @@ static void value_text(int row, char *o, size_t n) {
     case S_RES: { float r = tweaks_res_scale(); if (r <= 0) snprintf(o, n, "AUTO"); else snprintf(o, n, "%dX%d", ((int)(plat.width*r+.5f))&~1, ((int)(plat.height*r+.5f))&~1); break; }
     case S_RADAR: snprintf(o, n, "%s", tweaks_radar_bottom() ? "BOTTOM" : "TOP"); break;
     case S_RADAR_SIZE: snprintf(o, n, "%d%%", (int)(tweaks_radar_scale() * 100.0f + 0.5f)); break;
+    case S_FOV: snprintf(o, n, "%d%%", (int)(tweaks_fov_scale() * 100.0f + 0.5f)); break;
     case S_MODE: snprintf(o, n, "%s", plat.display_mode == 0 ? "WINDOWED" : plat.display_mode == 2 ? "EXCLUSIVE" : "BORDERLESS"); break;
     case S_FOCUS: snprintf(o, n, "%s", plat.pause_on_focus_loss ? "ON" : "OFF"); break;
     case C_LOOK: snprintf(o, n, "%s", plat.mouse_look ? "ON" : "OFF"); break;

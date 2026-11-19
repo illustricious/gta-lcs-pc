@@ -551,6 +551,7 @@ static void deliver_java_callbacks(void) {
     }
 }
 
+char rt_log_path[MAX_PATH]; /* shown by rt_fatal's message box */
 static void open_log(void) {
     /* Started from Explorer there is no console: keep the log next to the executable. */
     HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
@@ -559,6 +560,8 @@ static void open_log(void) {
     if (installed) snprintf(path, sizeof path, "%s/lcs.log", user_dir);
     else snprintf(path, sizeof path, "%s/build/lcs.log", root);
     if (!freopen(path, "w", stderr)) return;
+    snprintf(rt_log_path, sizeof rt_log_path, "%s", path);
+    for (char *q = rt_log_path; *q; q++) if (*q == '/') *q = '\\';
     rt_gui = 1;
     freopen(path, "a", stdout);
     setvbuf(stderr, 0, _IONBF, 0);
@@ -678,7 +681,11 @@ int main(int argc, char **argv) {
     if (assets2[0]) plat.asset_dirs[plat.nasset_dirs++] = assets2;
     if (have_music) plat.asset_dirs[plat.nasset_dirs++] = music_assets;
 
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) rt_fatal("SDL_Init: %s", SDL_GetError());
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
+        /* no usable audio backend: run silently (rt_audio.c keeps the game's mixer going) */
+        rt_log("host: SDL audio unavailable (%s), starting without sound\n", SDL_GetError());
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) rt_fatal("SDL_Init: %s", SDL_GetError());
+    }
     if (!have_size) {
         const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
         /* the engine always renders at the desktop resolution; the window may be any size (present.c) */

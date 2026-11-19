@@ -8,7 +8,7 @@
 ; Saves and settings live in Documents\Rockstar Games\GTA Liberty City Stories.
 
 #define AppName "GTA Liberty City Stories PC"
-#define AppVersion "0.2.0"
+#define AppVersion "0.2.1"
 #define Root "..\.."
 #define Sdl "..\..\.tools\sdl3\SDL3-3.4.18"
 

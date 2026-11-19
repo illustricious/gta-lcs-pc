@@ -25,8 +25,10 @@ typedef struct Settings {
     float draw_distance; /* 1.0 = the game's own distances, up to 3.0 */
     float res_scale;     /* internal resolution scale; 0 = the engine's own per-device value */
     float radar_scale;   /* radar size factor (Rust CHud::GetRadarSize*) */
+    float fov_scale;     /* field of view factor (Rust CDraw::SetFOV) */
+    int touch_controls;  /* draw the Android on-screen controls */
 } Settings;
-static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f};
+static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f};
 static char ini_path[600];
 
 static const char *DEFAULT_INI =
@@ -48,6 +50,10 @@ static const char *DEFAULT_INI =
     "radar_margin=28\n"
     "; radar size: 0.75 .. 1.5\n"
     "radar_scale=1.0\n"
+    "; field of view: 0.9 .. 1.4 (zoomed views keep theirs)\n"
+    "fov_scale=1.0\n"
+    "; Android on-screen controls: 0 = hidden (keyboard, mouse, gamepad), 1 = shown\n"
+    "touch_controls=0\n"
     "; per-action keys, separate on foot (foot_) and in vehicles (car_); unset = the gamepad mapping.\n"
     "; actions: accelerate brake handbrake enter_exit sprint jump attack next_weapon prev_weapon pickup\n"
     ";          look_behind look_left look_right horn move_x move_y steer_x steer_y (axes: two keys, negative,positive)\n"
@@ -80,6 +86,8 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strcmp(line, "radar")) cfg.radar_bottom = !strcmp(val, "bottom-left");
     else if (!strcmp(line, "radar_margin")) cfg.radar_margin = (float)atof(val);
     else if (!strcmp(line, "radar_scale")) cfg.radar_scale = (float)atof(val);
+    else if (!strcmp(line, "fov_scale")) cfg.fov_scale = (float)atof(val);
+    else if (!strcmp(line, "touch_controls")) cfg.touch_controls = atoi(val);
     else if (!strcmp(line, "draw_distance")) cfg.draw_distance = (float)atof(val);
     else if (!strcmp(line, "res_scale")) cfg.res_scale = (float)atof(val);
     else if (!strcmp(line, "fps_cap")) plat.fps_cap = atoi(val);
@@ -151,6 +159,12 @@ void tweaks_set_res_scale(float s) {
 }
 int tweaks_radar_bottom(void) { return cfg.radar_bottom; }
 float tweaks_radar_scale(void) { return cfg.radar_scale; }
+int tweaks_touch_controls(void) { return cfg.touch_controls; }
+float tweaks_fov_scale(void) { return cfg.fov_scale > 0 ? cfg.fov_scale : 1.0f; }
+void tweaks_set_fov_scale(float s) {
+    cfg.fov_scale = s < 0.8f ? 0.8f : s > 1.5f ? 1.5f : s;
+    char v[32]; snprintf(v, sizeof v, "%.2f", cfg.fov_scale); tweaks_save("fov_scale", v);
+}
 void tweaks_set_radar_scale(float s) {
     cfg.radar_scale = s < 0.5f ? 0.5f : s > 2.0f ? 2.0f : s;
     char v[32]; snprintf(v, sizeof v, "%.2f", cfg.radar_scale); tweaks_save("radar_scale", v);
@@ -368,6 +382,8 @@ void tweaks_apply(CPU *c) {
     {   /* radar position and size: Rust ports of the CHud radar getters (recomp/engine/src/hud.rs) */
         void lcs_set_radar(int bottom, float margin, float scale);
         lcs_set_radar(cfg.radar_bottom, cfg.radar_margin, cfg.radar_scale);
+        void lcs_set_fov_scale(float scale);
+        lcs_set_fov_scale(cfg.fov_scale > 0 ? cfg.fov_scale : 1.0f);
         void lcs_radar_layout(void); lcs_radar_layout();
     }
     scale_draw_distance();
@@ -390,4 +406,12 @@ void tweaks_apply(CPU *c) {
         engine_set_far_lod_scale(k);
         engine_report();
     }
+}
+
+/* Touchscreen::Render draws the Android on-screen controls (stick, fist, run, car, weapon buttons, steering
+ * selector). The PC build plays with keyboard, mouse or a gamepad, so it is skipped unless lcs.ini sets
+ * touch_controls=1. Touch input itself (Touchscreen::Update) still runs. */
+extern void G_543b7c_orig(CPU *c);
+void G_543b7c(CPU *c) {
+    if (tweaks_touch_controls()) G_543b7c_orig(c);
 }

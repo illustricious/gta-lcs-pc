@@ -6,6 +6,13 @@ A native Windows x64 port of **GTA: Liberty City Stories for Android (2.4.379)**
 - There is no emulator, interpreter, or rewritten engine. All game logic and rendering is the original code.
 - Only the operating-system services are written for Windows: files, threads, JNI, window, OpenGL ES, audio and input.
 
+## Versions
+
+| Release | What it is |
+| --- | --- |
+| **v0.1.0** (stable) | The pure static recompilation: every game function is the original code translated to C. It runs smoothly and is the recommended download. |
+| **v0.2.x** (experimental) | The same port plus an **engine reimplementation in progress**: some engine functions are rewritten in Rust (`recomp/engine`), currently CTimeCycle, the radar, CPad action getters and CCamera queries (about 1.6% of the game functions, see [PROGRESS.md](PROGRESS.md)). Each Rust function is checked bit for bit against the original (`LCS_RS_VERIFY=1`). It also adds the two-pane menu, per-action key bindings, a field-of-view setting and draw distance for building meshes. Expect rough edges. |
+
 **This repository contains no game code and no game data.** You need your own copy of the Android game. The installer copies the data from your copy and recompiles its code on your PC.
 
 ## Install
@@ -29,7 +36,7 @@ Requirements:
 
 ## Controls
 
-Gamepads (XInput, DualShock, DualSense through SDL3) are mapped like the Android controller. The on-screen touch buttons disappear once a pad or the keyboard is used. Keys can be rebound in **Settings → Controls**.
+Gamepads (XInput, DualShock, DualSense through SDL3) are mapped like the Android controller. The Android on-screen touch controls are hidden (v0.2.1 and later; `touch_controls=1` in lcs.ini shows them). Keys can be rebound in **Settings → Controls**.
 
 | Keyboard / mouse | Game button |
 | --- | --- |

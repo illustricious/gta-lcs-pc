@@ -315,3 +315,34 @@ extern "C" {
     fn G_32e220_orig(c: *mut Cpu);
     fn G_32e310_orig(c: *mut Cpu);
 }
+
+// ---- field of view ---------------------------------------------------------------------------------
+
+static FOV_SCALE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0x3f80_0000); // 1.0
+
+/// Host setting (lcs.ini `fov_scale`, GRAPHICS > FIELD OF VIEW).
+#[no_mangle]
+pub extern "C" fn lcs_set_fov_scale(scale: f32) {
+    let s = if scale.is_finite() && scale >= 0.5 && scale <= 2.0 { scale } else { 1.0 };
+    FOV_SCALE.store(s.to_bits(), core::sync::atomic::Ordering::Relaxed);
+}
+
+/// void CDraw::SetFOV(float): every camera mode hands its FOV to the renderer here. New behaviour (off while
+/// verifying): the normal camera FOVs (50 degrees and up) are widened by the host's FOV scale, up to 120 degrees;
+/// zoomed views (sniper, camera weapon) keep theirs.
+#[no_mangle]
+pub unsafe extern "C" fn G_46f818(c: *mut Cpu) {
+    let dst = got(0x7f96c8); // CDraw::ms_fFOV
+    verify::port_regions(c, G_46f818_orig, Ret::None, &[(dst, 4)], |c| {
+        let mut fov = c.s(0);
+        if !verify::enabled() && fov >= 50.0 {
+            let k = f32::from_bits(FOV_SCALE.load(core::sync::atomic::Ordering::Relaxed));
+            fov = (fov * k).min(120.0);
+        }
+        w32f(dst, fov);
+    });
+}
+
+extern "C" {
+    fn G_46f818_orig(c: *mut Cpu);
+}

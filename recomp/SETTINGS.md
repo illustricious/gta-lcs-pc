@@ -211,3 +211,12 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - Back from GAME navigates straight to the root list. The native Back used before was ignored after visiting Load or
   Delete, which left the title menu stuck on GAME.
 - Installer version 0.2.0.
+
+## No audio device, field of view (19 Nov 2026)
+- A PC without a playback device aborted at start: the OpenSL player was refused, OpenAL threw
+  `al::backend_exception: Device reset failure` and the game called abort(). The player now runs silently
+  (buffers are consumed at the real-time rate and discarded), and SDL starts without its audio subsystem when no
+  audio backend exists. The fatal message box shows the real log path.
+- FIELD OF VIEW (GRAPHICS, lcs.ini `fov_scale` 0.9-1.4): `CDraw::SetFOV` is a Rust port (camera.rs) that widens
+  camera FOVs of 50 degrees and up, capped at 120; zoomed views keep theirs.
+- Android on-screen controls: `Touchscreen::Render` (0x543b7c) is skipped unless lcs.ini sets `touch_controls=1`; touch input still works.

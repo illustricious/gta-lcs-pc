@@ -24,7 +24,23 @@ struct Player {
     uint32_t state;
     volatile LONG alive;
     HANDLE pump;
+    /* No playback device (a PC without speakers/headphones, or audio disabled): the player still runs, buffers are
+     * "played" at the real-time rate and thrown away, so the game's OpenAL keeps going without sound. */
+    int silent;
+    uint32_t bytes_per_sec;
+    uint64_t silent_played;
+    LARGE_INTEGER silent_last;
 };
+static LARGE_INTEGER qpc_freq;
+/* bytes the device has consumed so far */
+static uint64_t played_bytes(Player *p) {
+    if (!p->silent) return p->put_total - (uint64_t)SDL_GetAudioStreamQueued(p->stream);
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    if (p->state == 3) p->silent_played += (uint64_t)((now.QuadPart - p->silent_last.QuadPart) * (double)p->bytes_per_sec / qpc_freq.QuadPart);
+    p->silent_last = now;
+    if (p->silent_played > p->put_total) p->silent_played = p->put_total;
+    return p->silent_played;
+}
 
 static uint64_t vt_engine_obj[10], vt_engine[16], vt_mix_obj[10], vt_player_obj[10], vt_queue[4], vt_play[8], vt_config[2];
 static Itf engine_obj = {0}, engine_itf = {0}, mix_obj = {0};
@@ -35,8 +51,8 @@ static DWORD WINAPI pump_main(void *param) {
     while (p->alive) {
         int fired = 0;
         EnterCriticalSection(&p->lock);
-        if (p->count && p->stream) {
-            uint64_t played = p->put_total - (uint64_t)SDL_GetAudioStreamQueued(p->stream);
+        if (p->count && (p->stream || p->silent)) {
+            uint64_t played = played_bytes(p);
             uint32_t sz = p->sizes[p->head];
             if (played >= p->done_total + sz) {
                 p->done_total += sz;
@@ -83,10 +99,12 @@ SLF(CreateAudioPlayer) {
     Player *p = calloc(1, sizeof *p);
     p->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, 0, 0);
     if (!p->stream) {
-        rt_log("audio: cannot open playback device: %s\n", SDL_GetError());
-        free(p);
-        RET(0x0C);
-        return;
+        /* refusing the player makes OpenAL throw "Device reset failure" and the game abort: run silently instead */
+        rt_log("audio: cannot open playback device (%s): running without sound\n", SDL_GetError());
+        p->silent = 1;
+        p->bytes_per_sec = rate * channels * (bits / 8);
+        if (!qpc_freq.QuadPart) QueryPerformanceFrequency(&qpc_freq);
+        QueryPerformanceCounter(&p->silent_last);
     }
     rt_log("audio: OpenSL player %u Hz, %u ch, %u-bit%s\n", rate, channels, bits, repr == 3 ? " float" : "");
     InitializeCriticalSection(&p->lock);
@@ -114,7 +132,7 @@ SLF(player_Destroy) {
     Player *p = ((Itf *)P(0))->owner;
     p->alive = 0;
     WaitForSingleObject(p->pump, 2000);
-    SDL_DestroyAudioStream(p->stream);
+    if (p->stream) SDL_DestroyAudioStream(p->stream);
     p->stream = 0;
 }
 SLF(queue_Enqueue) {
@@ -122,7 +140,7 @@ SLF(queue_Enqueue) {
     uint32_t size = (uint32_t)A(2);
     EnterCriticalSection(&p->lock);
     if (p->count == 256) { LeaveCriticalSection(&p->lock); RET(0x0B); return; } /* SL_RESULT_BUFFER_INSUFFICIENT */
-    SDL_PutAudioStreamData(p->stream, P(1), (int)size);
+    if (p->stream) SDL_PutAudioStreamData(p->stream, P(1), (int)size);
     static int audible; /* diagnostic: report once when the mixer delivers non-silent 16-bit PCM */
     if (!audible) {
         const int16_t *s = P(1);
@@ -138,7 +156,8 @@ SLF(queue_Enqueue) {
 SLF(queue_Clear) {
     Player *p = ((Itf *)P(0))->owner;
     EnterCriticalSection(&p->lock);
-    SDL_ClearAudioStream(p->stream);
+    if (p->stream) SDL_ClearAudioStream(p->stream);
+    p->silent_played = 0;
     p->count = 0;
     p->head = 0;
     p->put_total = p->done_total = 0;
@@ -161,9 +180,14 @@ SLF(queue_RegisterCallback) {
 }
 SLF(play_SetPlayState) {
     Player *p = ((Itf *)P(0))->owner;
+    EnterCriticalSection(&p->lock);
+    if (p->silent) played_bytes(p); /* account the time played in the old state */
     p->state = (uint32_t)A(1);
-    if (p->state == 3) SDL_ResumeAudioStreamDevice(p->stream);
-    else SDL_PauseAudioStreamDevice(p->stream);
+    LeaveCriticalSection(&p->lock);
+    if (p->stream) {
+        if (p->state == 3) SDL_ResumeAudioStreamDevice(p->stream);
+        else SDL_PauseAudioStreamDevice(p->stream);
+    }
     RET(0);
 }
 SLF(play_GetPlayState) {
