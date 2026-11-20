@@ -273,3 +273,11 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - Devices SDL has no gamepad mapping for are opened as plain joysticks (axes 0/1 = left stick, 2/3 = right stick,
   hat = d-pad, buttons 0..9 = A B X Y L1 R1 Back Start L3 R3). `--verbose` logs every device name with its axes/hats/buttons.
 - Not tested with the reporting user's stick (their left analog does not respond); the log line names the device.
+
+## Traffic and pedestrian range follows draw_distance (20 Nov 2026)
+- `rt/population.c` hooks the device-detail getters GetPopulationCullRange (+0x30), ...OffScreen, ...FarAway,
+  GetPopulationAddMinRadius, GetPopulationAddMaxRadius and GetDriverHighDetailRange and multiplies the result by
+  `draw_distance` (1.0..3.0), so cars and peds are created and kept farther out.
+- Checked: `--verbose` logs the scaled values (AddMaxRadius 50 -> 100 and DriverHighDetailRange 25 -> 50 at 2.0).
+  Not measured in play: the render-list entity count in a short scripted run is too noisy to show the difference.
+  Shadow distances are literals inside CShadows and are not scaled yet.
