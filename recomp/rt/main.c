@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <direct.h>
 #include <windows.h>
 #include <shlobj.h>
@@ -394,7 +395,34 @@ static void toggle_fullscreen(void) {
 /* Losing focus (alt-tab, a remote desktop client switching windows) can swallow key-up events:
  * release everything the game still sees as held, and optionally pause. */
 static float pad_axis[6];
+/* Every connected pad keeps its own axes; the game sees the one pushed furthest, so a second device resting at 0
+ * (or a pad without a usable left stick) no longer overwrites a working one. Devices SDL has no gamepad mapping for
+ * are opened as plain joysticks: axes 0/1 = left stick, 2/3 = right stick, hat = d-pad. */
+#define MAXDEV 8
+static struct { SDL_JoystickID id; float ax[6]; int raw; Uint8 hat; } devs[MAXDEV];
+static int ndevs;
+static int dev_slot(SDL_JoystickID id, int create) {
+    for (int i = 0; i < ndevs; i++) if (devs[i].id == id) return i;
+    if (!create || ndevs >= MAXDEV) return -1;
+    memset(&devs[ndevs], 0, sizeof devs[0]); devs[ndevs].id = id;
+    return ndevs++;
+}
+static void dev_remove(SDL_JoystickID id) {
+    int i = dev_slot(id, 0);
+    if (i >= 0) devs[i] = devs[--ndevs];
+}
+static void dev_axis(SDL_JoystickID id, int axis, float v) {
+    int i = dev_slot(id, 1);
+    if (i < 0 || axis < 0 || axis > 5) return;
+    devs[i].ax[axis] = v;
+    for (int a = 0; a < 6; a++) {
+        float best = 0;
+        for (int d = 0; d < ndevs; d++) if (fabsf(devs[d].ax[a]) > fabsf(best)) best = devs[d].ax[a];
+        pad_axis[a] = best;
+    }
+}
 static void release_all_input(void) {
+    for (int d = 0; d < ndevs; d++) for (int a = 0; a < 6; a++) devs[d].ax[a] = 0;
     for (int id = 0; id < B_COUNT; id++)
         if (held[id]) { held[id] = 0; gta("onJoyButtonUp", 2, 0, (uint64_t)id, 0, 0); }
     for (int i = 0; i < 6; i++) pad_axis[i] = 0;
@@ -482,11 +510,51 @@ static void pump_events(void) {
             if (mouse_look_active() && e.wheel.y != 0) { int b = e.wheel.y > 0 ? B_RIGHT : B_LEFT; button(b, 1); button(b, 0); }
             break;
         case SDL_EVENT_GAMEPAD_ADDED:
-            if (SDL_OpenGamepad(e.gdevice.which)) { gamepads++; rt_log("input: gamepad connected\n"); }
+            if (SDL_OpenGamepad(e.gdevice.which)) { gamepads++; rt_log("input: gamepad connected: %s\n", SDL_GetGamepadNameForID(e.gdevice.which)); }
             break;
+        case SDL_EVENT_JOYSTICK_ADDED:
+            if (!SDL_IsGamepad(e.jdevice.which)) {
+                SDL_Joystick *j = SDL_OpenJoystick(e.jdevice.which);
+                if (j) {
+                    int k = dev_slot(e.jdevice.which, 1);
+                    if (k >= 0) devs[k].raw = 1;
+                    rt_log("input: joystick without a gamepad mapping: %s (%d axes, %d hats, %d buttons)\n", SDL_GetJoystickName(j),
+                           SDL_GetNumJoystickAxes(j), SDL_GetNumJoystickHats(j), SDL_GetNumJoystickButtons(j));
+                }
+            }
+            break;
+        case SDL_EVENT_JOYSTICK_REMOVED:
+            dev_remove(e.jdevice.which);
+            break;
+        case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
+            int i = dev_slot(e.jaxis.which, 0);
+            if (i < 0 || !devs[i].raw) break;
+            float v = e.jaxis.value / 32767.0f;
+            if (v > 0.5f || v < -0.5f) plat.pad_input = 1;
+            if (e.jaxis.axis < 4) dev_axis(e.jaxis.which, e.jaxis.axis, v);
+            break;
+        }
+        case SDL_EVENT_JOYSTICK_HAT_MOTION: {
+            int i = dev_slot(e.jhat.which, 0);
+            if (i < 0 || !devs[i].raw) break;
+            Uint8 old = devs[i].hat, nw = e.jhat.value; devs[i].hat = nw;
+            static const struct { Uint8 m; int b; } hm[4] = {{SDL_HAT_UP, B_UP}, {SDL_HAT_DOWN, B_DOWN}, {SDL_HAT_LEFT, B_LEFT}, {SDL_HAT_RIGHT, B_RIGHT}};
+            plat.pad_input = 1;
+            for (int k = 0; k < 4; k++) if ((old & hm[k].m) != (nw & hm[k].m)) button(hm[k].b, (nw & hm[k].m) != 0);
+            break;
+        }
+        case SDL_EVENT_JOYSTICK_BUTTON_DOWN: case SDL_EVENT_JOYSTICK_BUTTON_UP: {
+            int i = dev_slot(e.jbutton.which, 0);
+            if (i < 0 || !devs[i].raw) break;
+            static const int bm[10] = {B_A, B_B, B_X, B_Y, B_L1, B_R1, B_BACK, B_START, B_L3, B_R3};
+            plat.pad_input = 1;
+            if (e.jbutton.button < 10) button(bm[e.jbutton.button], e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN);
+            break;
+        }
         case SDL_EVENT_GAMEPAD_REMOVED: {
             SDL_Gamepad *g = SDL_GetGamepadFromID(e.gdevice.which);
             if (g) { SDL_CloseGamepad(g); if (gamepads) gamepads--; }
+            dev_remove(e.gdevice.which);
             break;
         }
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: {
@@ -499,12 +567,12 @@ static void pump_events(void) {
             float v = e.gaxis.value / 32767.0f;
             if (v > 0.5f || v < -0.5f) plat.pad_input = 1;
             switch (e.gaxis.axis) {
-            case SDL_GAMEPAD_AXIS_LEFTX: pad_axis[0] = v; break;
-            case SDL_GAMEPAD_AXIS_LEFTY: pad_axis[1] = v; break;
-            case SDL_GAMEPAD_AXIS_RIGHTX: pad_axis[2] = v; break;
-            case SDL_GAMEPAD_AXIS_RIGHTY: pad_axis[3] = v; break;
-            case SDL_GAMEPAD_AXIS_LEFT_TRIGGER: pad_axis[4] = v; break;
-            case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: pad_axis[5] = v; break;
+            case SDL_GAMEPAD_AXIS_LEFTX: dev_axis(e.gaxis.which, 0, v); break;
+            case SDL_GAMEPAD_AXIS_LEFTY: dev_axis(e.gaxis.which, 1, v); break;
+            case SDL_GAMEPAD_AXIS_RIGHTX: dev_axis(e.gaxis.which, 2, v); break;
+            case SDL_GAMEPAD_AXIS_RIGHTY: dev_axis(e.gaxis.which, 3, v); break;
+            case SDL_GAMEPAD_AXIS_LEFT_TRIGGER: dev_axis(e.gaxis.which, 4, v); break;
+            case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: dev_axis(e.gaxis.which, 5, v); break;
             default: break;
             }
             break;

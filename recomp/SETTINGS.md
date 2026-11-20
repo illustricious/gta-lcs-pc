@@ -266,3 +266,10 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
   landing from the teleport. Leave it off until that is checked in a normal walk or drive.
 - Debug: `LCS_WORLD_FADE_DBG` bits 1 = skip the second pass, 2 = do not defer, 4 = second pass only for Render(0),
   8 = only for Render(!=0); `LCS_DISSOLVE_LOG=1` logs every dissolve value change; `--verbose` logs `swap:` lines.
+
+## Several pads and unmapped joysticks (20 Nov 2026)
+- Each connected pad now keeps its own axes and the game sees the one pushed furthest, so a second device resting at
+  0 no longer overwrites a working left stick (before, all pads wrote the same four axis slots).
+- Devices SDL has no gamepad mapping for are opened as plain joysticks (axes 0/1 = left stick, 2/3 = right stick,
+  hat = d-pad, buttons 0..9 = A B X Y L1 R1 Back Start L3 R3). `--verbose` logs every device name with its axes/hats/buttons.
+- Not tested with the reporting user's stick (their left analog does not respond); the log line names the device.
