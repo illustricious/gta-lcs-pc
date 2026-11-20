@@ -242,3 +242,12 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - Checked on foot: with the scripted stick pushed and no key held the player stays still (0 u/s); holding W walks at a
   steady 5.3 u/s. In-vehicle keys are not checked end to end (a gamepad on this PC adds noise to scripted drives).
 - Test option `--key FROM TO NAME` holds a key between two frames for the per-action bindings.
+
+## Dissolve support in the shaders (20 Nov 2026, step 1 of the sector cross-fade)
+- Every guest fragment shader now carries `uniform mediump float uLcsDissolve` and drops a pixel when an
+  interleaved-gradient noise value is >= the uniform (screen-door dither), so geometry can fade without alpha blending.
+  rt/dissolve.c patches the source in the glShaderSource thunk, registers each linked program, and sets the uniform on
+  all of them from `rt_dissolve_set(v)` (1.0 = draw everything, the default; the game renders as before).
+- Test: `LCS_DISSOLVE_TEST=0.5` dithers the whole scene at 50%; `LCS_DUMP_SHADERS=1` writes the patched sources.
+- Next steps of the cross-fade: keep the old world sector and its model slots alive after a swap, then draw it a second
+  time with a falling dissolve value while the new sector draws normally.

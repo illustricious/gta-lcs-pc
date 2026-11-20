@@ -634,6 +634,7 @@ int main(int argc, char **argv) {
     find_layout();
     open_log();
     host_act_defaults_init();
+    { extern void rt_dissolve_init(void); rt_dissolve_init(); }
     tweaks_load(installed ? user_dir : root);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--verbose")) rt_verbose++;
