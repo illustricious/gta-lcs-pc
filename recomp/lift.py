@@ -40,6 +40,7 @@ HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8,
                     0x3452dc, 0x345490, 0x344ea0, 0x3458c4, 0x345938, 0x3459ac,
                     0x563238,  # CalcScreenSize: world cull counters (rt/engine_bridge.c)
                     0x46f818,  # CDraw::SetFOV: FOV scale (recomp/engine/src/camera.rs)
+                    0x39d28c, 0x39bfd0, 0x39ef48,  # cWorldStream swap / RemoveOldSectorModels / Render: sector cross-fade (rt/world_fade.c)
                     0x543b7c,  # Touchscreen::Render: on-screen controls hidden (rt/tweaks.c)
                     # CCamera / CCam queries and setters (recomp/engine/src/camera.rs)
                     0x3135fc, 0x329e10, 0x329ee8, 0x329dd4, 0x329de0, 0x328164, 0x329dec, 0x3299c4, 0x32e3f4,

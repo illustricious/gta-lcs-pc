@@ -27,6 +27,7 @@ typedef struct Settings {
     float radar_scale;   /* radar size factor (Rust CHud::GetRadarSize*) */
     float fov_scale;     /* field of view factor (Rust CDraw::SetFOV) */
     float camera_distance; /* on-foot camera distance factor (CCam::Process_FollowPed_SA parameter table) */
+    float world_fade;    /* seconds of cross-fade between world sectors at a swap; 0 = off */
     int touch_controls;  /* draw the Android on-screen controls */
 } Settings;
 static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f};
@@ -63,6 +64,9 @@ static const char *DEFAULT_INI =
     ";          Keys by SDL name or Mouse1..Mouse3. Also set from SETTINGS > CONTROLS > ON FOOT / VEHICLE KEYS.\n"
     "; examples: car_accelerate=W  car_brake=S  car_handbrake=Space  foot_sprint=Left Shift  foot_jump=Space\n"
     "\n"
+    "; seconds of cross-fade between world sectors when the streamed sector swaps in (hides the LOD pop-in); 0 = off\n"
+    "world_fade=0\n"
+    "\n"
     "; draw distance: 1.0 = original, up to 3.0 (vehicles, peds, small objects, far clip)\n"
     "draw_distance=2.0\n"
     "\n"
@@ -91,6 +95,7 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strcmp(line, "radar_scale")) cfg.radar_scale = (float)atof(val);
     else if (!strcmp(line, "fov_scale")) cfg.fov_scale = (float)atof(val);
     else if (!strcmp(line, "camera_distance")) cfg.camera_distance = (float)atof(val);
+    else if (!strcmp(line, "world_fade")) cfg.world_fade = (float)atof(val);
     else if (!strcmp(line, "touch_controls")) cfg.touch_controls = atoi(val);
     else if (!strcmp(line, "draw_distance")) cfg.draw_distance = (float)atof(val);
     else if (!strcmp(line, "res_scale")) cfg.res_scale = (float)atof(val);
@@ -151,6 +156,7 @@ void tweaks_save(const char *key, const char *value) {
     if (f) { fwrite(out, 1, o, f); fclose(f); }
 }
 
+float tweaks_world_fade(void) { return cfg.world_fade; }
 float tweaks_draw_distance(void) { return cfg.draw_distance; }
 void tweaks_set_draw_distance(float k) {
     cfg.draw_distance = k < 1.0f ? 1.0f : k > 3.0f ? 3.0f : k;

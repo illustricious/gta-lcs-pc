@@ -251,3 +251,18 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - Test: `LCS_DISSOLVE_TEST=0.5` dithers the whole scene at 50%; `LCS_DUMP_SHADERS=1` writes the patched sources.
 - Next steps of the cross-fade: keep the old world sector and its model slots alive after a swap, then draw it a second
   time with a falling dissolve value while the new sector draws normally.
+
+## World sector cross-fade (`world_fade`, EXPERIMENTAL, default 0 = off) (20 Nov 2026)
+- `world_fade=<seconds>` in lcs.ini (or env `LCS_WORLD_FADE`) enables rt/world_fade.c: SwapToStreamedSector keeps the old
+  sector alive (RemoveOldSectorModels, 0x39bfd0, is deferred to the end of the fade) and cWorldStream::Render (0x39ef48)
+  is run a second time with the old sector temporarily installed (fields +0x30..+0x5f swapped with +0x78..+0xa7).
+  The new sector draws the pixels where the dither noise < t, the old one the complement (negative `uLcsDissolve`).
+- Status: NOT verified. It runs through six swaps without crashing, but one run with both passes active showed the
+  ground and buildings missing and dithered after the fades had ended (the baseline at the same frames was clean).
+  Deferral alone (`LCS_WORLD_FADE_DBG=1`) was clean. Second pass restricted to Render(0) or to Render(!=0)
+  (`LCS_WORLD_FADE_DBG=4` / `8`) looked clean in screenshots, so the cause is not isolated (Render rewrites instance
+  data in place and fills the alpha queue, so a second pass has side effects; load timing of the harness also varies
+  between runs). No screenshot sequence of a swap without a pop was obtained, since the scripted runs spend the swaps
+  landing from the teleport. Leave it off until that is checked in a normal walk or drive.
+- Debug: `LCS_WORLD_FADE_DBG` bits 1 = skip the second pass, 2 = do not defer, 4 = second pass only for Render(0),
+  8 = only for Render(!=0); `LCS_DISSOLVE_LOG=1` logs every dissolve value change; `--verbose` logs `swap:` lines.

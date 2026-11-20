@@ -36,7 +36,7 @@ static int enabled = 1;
 static const char *DECL = "uniform mediump float uLcsDissolve;\n";
 static const char *TEST =
     "\n    if (uLcsDissolve < 0.999) { mediump float lcsN = fract(dot(gl_FragCoord.xy, vec2(0.7548776662, 0.5698402910))); "
-    "if (lcsN >= uLcsDissolve) discard; }\n";
+    "if (uLcsDissolve >= 0.0 ? lcsN >= uLcsDissolve : lcsN < -uLcsDissolve) discard; }\n";
 
 /* returns a malloc'd patched copy of `src`, or 0 when it has no recognisable main() */
 static char *patch_fragment(const char *src) {
@@ -125,15 +125,16 @@ void rt_gl_use_program(int prog) {
     if (prog > 0 && prog < MAXPROG && prog_loc[prog] && cur_value != 1.0f) u1(prog_loc[prog] - 1, cur_value);
 }
 
-/* 1.0 = draw everything (default), 0.0 = draw nothing */
+/* 1.0 = draw everything (default), 0.0 = draw nothing, -x = exactly the pixels that +x drops */
 void rt_dissolve_set(float v) {
     typedef void (__stdcall *UseFn)(unsigned);
     static UseFn use;
     if (!use) use = (UseFn)gl("glUseProgram");
-    if (v < 0.0f) v = 0.0f;
+    if (v < -1.0f) v = -1.0f; /* negative: the complement, keeps the pixels the positive value would drop */
     if (v > 1.0f) v = 1.0f;
     if (v == cur_value) return;
     cur_value = v;
+    if (getenv("LCS_DISSOLVE_LOG")) rt_log("dissolve: %f (%d programs)\n", v, nregistered);
     for (int i = 0; i < nregistered && i < MAXPROG; i++) set_uniform_on((unsigned)registered[i], v);
     if (use) use(cur_prog);
 }

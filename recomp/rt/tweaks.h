@@ -4,6 +4,7 @@
 void tweaks_load(const char *root);
 void tweaks_set(const char *key, const char *value); /* same keys as lcs.ini */
 void tweaks_apply(CPU *c);
+float tweaks_world_fade(void);
 float tweaks_draw_distance(void);
 void tweaks_set_draw_distance(float k);
 float tweaks_res_scale(void);
