@@ -103,6 +103,8 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strcmp(line, "vsync")) plat.vsync = atoi(val);
     else if (!strncmp(line, "bind_", 5) || !strncmp(line, "mbind_", 6)) host_bind_ini(line, atoi(val));
     else if (!strncmp(line, "foot_", 5) || !strncmp(line, "car_", 4)) { int host_action_ini(const char *, const char *); host_action_ini(line, val); }
+    else if (!strncmp(line, "padfoot_", 8) || !strncmp(line, "padcar_", 7)) { int host_pad_ini(const char *, const char *); host_pad_ini(line, val); }
+    else if (!strcmp(line, "pad_preset")) { void host_pad_preset(int); host_pad_preset(!strcmp(val, "classic")); }
     else if (!strcmp(line, "mouse_look")) plat.mouse_look = atoi(val);
     else if (!strcmp(line, "mouse_sensitivity")) plat.mouse_sensitivity = (float)atof(val);
     else if (!strcmp(line, "definitive_menu")) frontend_set_enabled(atoi(val) != 0);

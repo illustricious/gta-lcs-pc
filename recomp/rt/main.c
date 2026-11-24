@@ -150,7 +150,8 @@ static void act_load_defaults(int veh) {
     for (unsigned i = 0; i < sizeof act_defaults / sizeof act_defaults[0]; i++)
         if (act_defaults[i].veh == veh) { act_key[veh][act_defaults[i].act][0] = act_defaults[i].k0; act_key[veh][act_defaults[i].act][1] = act_defaults[i].k1; }
 }
-void host_act_defaults_init(void) { act_load_defaults(0); act_load_defaults(1); act_any = 1; }
+static void pad_load_defaults(void);
+void host_act_defaults_init(void) { act_load_defaults(0); act_load_defaults(1); pad_load_defaults(); act_any = 1; }
 
 static int act_parse_key(const char *s) {
     while (*s == ' ') s++;
@@ -174,6 +175,56 @@ int host_action_ini(const char *key, const char *val) {
     }
     return 1;
 }
+/* Gamepad bindings per action (padfoot_<action> / padcar_<action> in lcs.ini, e.g. padcar_accelerate=RT). One pad
+ * input per action; it is OR-ed with the keyboard binding, and an action bound here no longer reads the original
+ * pad button. Default is the modern GTA layout (pad_preset=modern); pad_preset=classic leaves the original mapping. */
+enum { PAD_NONE, PAD_A, PAD_B, PAD_X, PAD_Y, PAD_LB, PAD_RB, PAD_L3, PAD_R3, PAD_BACK, PAD_START, PAD_UP, PAD_DOWN,
+       PAD_LEFT, PAD_RIGHT, PAD_LT, PAD_RT, PAD_COUNT };
+static const char *pad_names[PAD_COUNT] = {"", "A", "B", "X", "Y", "LB", "RB", "L3", "R3", "Back", "Start", "Up", "Down",
+                                           "Left", "Right", "LT", "RT"};
+static const int pad_sdl[PAD_COUNT] = {-1, SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST,
+    SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+    SDL_GAMEPAD_BUTTON_LEFT_STICK, SDL_GAMEPAD_BUTTON_RIGHT_STICK, SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_START,
+    SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, -1, -1};
+static unsigned char pad_key[2][ACT_COUNT];
+static bool pad_state[PAD_COUNT];
+static int pad_preset_classic;
+static SDL_Gamepad *open_pads[8];
+static int n_open_pads;
+static const struct { unsigned char veh, act, pad; } pad_defaults[] = {
+    {0, ACT_SPRINT, PAD_A}, {0, ACT_JUMP, PAD_X}, {0, ACT_ATTACK, PAD_RT}, {0, ACT_ENTER_EXIT, PAD_Y},
+    {1, ACT_ACCELERATE, PAD_RT}, {1, ACT_BRAKE, PAD_LT}, {1, ACT_HANDBRAKE, PAD_RB}, {1, ACT_ENTER_EXIT, PAD_Y},
+    {1, ACT_HORN, PAD_L3}, {1, ACT_LOOK_BEHIND, PAD_LB},
+};
+static void pad_load_defaults(void) {
+    memset(pad_key, 0, sizeof pad_key);
+    if (pad_preset_classic) return;
+    for (unsigned i = 0; i < sizeof pad_defaults / sizeof pad_defaults[0]; i++) pad_key[pad_defaults[i].veh][pad_defaults[i].act] = pad_defaults[i].pad;
+}
+void host_pad_preset(int classic) { pad_preset_classic = classic; pad_load_defaults(); act_any = 1; }
+static int pad_parse(const char *s) {
+    while (*s == ' ') s++;
+    for (int i = 1; i < PAD_COUNT; i++) if (!SDL_strcasecmp(s, pad_names[i])) return i;
+    return 0;
+}
+/* "padfoot_sprint" / "padcar_accelerate" */
+int host_pad_ini(const char *key, const char *val) {
+    int veh = !strncmp(key, "padcar_", 7);
+    if (!veh && strncmp(key, "padfoot_", 8)) return 0;
+    const char *name = key + (veh ? 7 : 8);
+    for (int a = 0; a < ACT_COUNT; a++)
+        if (!strcmp(name, act_names[a])) { pad_key[veh][a] = (unsigned char)pad_parse(val); act_any = 1; return 1; }
+    return 1;
+}
+static void pad_snapshot(void) {
+    memset(pad_state, 0, sizeof pad_state);
+    for (int i = 0; i < n_open_pads; i++) {
+        SDL_Gamepad *g = open_pads[i];
+        for (int b = 1; b < PAD_LT; b++) if (SDL_GetGamepadButton(g, (SDL_GamepadButton)pad_sdl[b])) pad_state[b] = 1;
+        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 9000) pad_state[PAD_LT] = 1;
+        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 9000) pad_state[PAD_RT] = 1;
+    }
+}
 static int act_held(const bool *ks, int k) {
     if (k <= 0) return 0;
     if (k >= ACT_MOUSE) return (SDL_GetMouseState(0, 0) & SDL_BUTTON_MASK(k - ACT_MOUSE)) != 0;
@@ -193,11 +244,13 @@ static void actions_frame(const bool *ks_in) {
         ks = ks_local;
     }
     if (!act_any) return;
+    pad_snapshot();
     for (int v = 0; v < 2; v++)
         for (int a = 0; a < ACT_COUNT; a++) {
             act_prev[v][a] = act_now[v][a];
             int neg = act_held(ks, act_key[v][a][0]), pos = act_held(ks, act_key[v][a][1]);
-            act_now[v][a] = (unsigned char)neg;
+            int pd = pad_key[v][a] && pad_state[pad_key[v][a]];
+            act_now[v][a] = (unsigned char)(neg || pd);
             act_axis[v][a] = (signed char)((pos - neg) * 127);
         }
 }
@@ -241,7 +294,7 @@ void host_act_clear(int veh) {
     act_recount();
 }
 int host_action(int a, int vehicle) {
-    if (a < 0 || a >= ACT_COUNT || !act_key[vehicle != 0][a][0]) return -1;
+    if (a < 0 || a >= ACT_COUNT || (!act_key[vehicle != 0][a][0] && !pad_key[vehicle != 0][a])) return -1;
     return act_now[vehicle != 0][a] | act_prev[vehicle != 0][a] << 1;
 }
 int host_action_axis(int a, int vehicle) {
@@ -510,7 +563,9 @@ static void pump_events(void) {
             if (mouse_look_active() && e.wheel.y != 0) { int b = e.wheel.y > 0 ? B_RIGHT : B_LEFT; button(b, 1); button(b, 0); }
             break;
         case SDL_EVENT_GAMEPAD_ADDED:
-            if (SDL_OpenGamepad(e.gdevice.which)) { gamepads++; rt_log("input: gamepad connected: %s\n", SDL_GetGamepadNameForID(e.gdevice.which)); }
+            { SDL_Gamepad *g = SDL_OpenGamepad(e.gdevice.which);
+              if (g) { gamepads++; if (n_open_pads < 8) open_pads[n_open_pads++] = g;
+                       rt_log("input: gamepad connected: %s\n", SDL_GetGamepadNameForID(e.gdevice.which)); } }
             break;
         case SDL_EVENT_JOYSTICK_ADDED:
             if (!SDL_IsGamepad(e.jdevice.which)) {
@@ -553,6 +608,7 @@ static void pump_events(void) {
         }
         case SDL_EVENT_GAMEPAD_REMOVED: {
             SDL_Gamepad *g = SDL_GetGamepadFromID(e.gdevice.which);
+            for (int k = 0; k < n_open_pads; k++) if (open_pads[k] == g) { open_pads[k] = open_pads[--n_open_pads]; break; }
             if (g) { SDL_CloseGamepad(g); if (gamepads) gamepads--; }
             dev_remove(e.gdevice.which);
             break;

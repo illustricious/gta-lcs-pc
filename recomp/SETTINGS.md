@@ -281,3 +281,14 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - Checked: `--verbose` logs the scaled values (AddMaxRadius 50 -> 100 and DriverHighDetailRange 25 -> 50 at 2.0).
   Not measured in play: the render-list entity count in a short scripted run is too noisy to show the difference.
   Shadow distances are literals inside CShadows and are not scaled yet.
+
+## Gamepad layout: modern GTA preset (20 Nov 2026)
+- `pad_preset=modern` (default) binds, through the same per-action getters as the keyboard keys (pad.rs), on foot:
+  A = sprint, X = jump, RT = attack, Y = enter/exit; in a vehicle: RT = accelerate, LT = brake/reverse, RB = handbrake,
+  Y = enter/exit, L3 = horn, LB = look behind. Sticks and the remaining buttons keep the game's own mapping.
+  `pad_preset=classic` keeps the original Android mapping for every action.
+- Override one action in lcs.ini: `padfoot_<action>=<input>` / `padcar_<action>=<input>`, input = A B X Y LB RB LT RT L3 R3
+  Back Start Up Down Left Right (empty = back to the original pad button). Actions are the same names as `foot_*`/`car_*`.
+  The pad binding is OR-ed with the keyboard binding. Triggers count as pressed above ~27% travel.
+- Not checked with a physical pad: only that the build starts, plays and walks with the keyboard unchanged. There is no
+  menu page for pad bindings yet (ini only).
