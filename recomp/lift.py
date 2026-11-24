@@ -9,6 +9,7 @@ Usage: python recomp/lift.py <lib.so> <outdir> --prefix G --base 0x200000000
 import argparse
 import bisect
 import hashlib
+import re
 import struct
 import sys
 import time
@@ -47,6 +48,11 @@ HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8,
                     0x3135fc, 0x329e10, 0x329ee8, 0x329dd4, 0x329de0, 0x328164, 0x329dec, 0x3299c4, 0x32e3f4,
                     0x329e18, 0x329eac, 0x32e1f8, 0x31fb84, 0x313a78, 0x32807c, 0x328088, 0x327324, 0x32af08,
                     0x32dffc, 0x326a20, 0x32bf70, 0x32e080, 0x32e438, 0x32e410, 0x32e220, 0x32e310}}  # CFont::PrintString: text capture for host-drawn engine menu pages (rt/frontend.c)
+
+# Float literals scaled at run time by the draw distance (rt/shadows.c rt_scale_f32): address of the instruction that
+# loads the literal -> 0 distance (x k), 1 squared distance (x k^2). CShadows::StoreShadowForVehicle cut-off and fade
+# distances, and the squared cut-off of StoreShadowForPedObject.
+CONST_SCALE = {0x493134: 1, 0x493144: 0, 0x493150: 1, 0x49315c: 0, 0x4939a8: 1}
 
 CHUNK = 0x8000  # bytes of guest text per generated C file
 TERMINATORS = {'b', 'ret', 'br', 'brk', 'udf', '.byte'}
@@ -422,6 +428,10 @@ def emit_region(mod, tr_stats, start, end):
         text += '\nvoid %s(CPU *c) { RT_ENTER(%s); %s_body(c, 0); }' % (name, hx(mod.base + start), name)
         for t in extra:
             text += '\nvoid %s(CPU *c) { RT_ENTER(%s); %s_body(c, %s); }' % (mod.fname(t), hx(mod.base + t), name, hx(t))
+    if mod.prefix == 'G':
+        for addr, kind in CONST_SCALE.items():
+            pat = re.compile(r'^(.*?)(0x[0-9a-f]{8})(ull|u)(.*?/\* %x )' % addr, re.M)
+            text = pat.sub(lambda m: '%srt_scale_f32(%su, %d)%s%s' % (m.group(1), m.group(2), kind, 'ull' if False else '', m.group(4)) if m.group(3) == 'u' else '%s(uint64_t)rt_scale_f32(%su, %d)%s' % (m.group(1), m.group(2), kind, m.group(4)), text)
     for hooked in HOST_HOOKS.get(mod.prefix, set()):
         entry = mod.fname(hooked)
         text = text.replace('void %s(CPU *c)' % entry, 'void %s_orig(CPU *c)' % entry)

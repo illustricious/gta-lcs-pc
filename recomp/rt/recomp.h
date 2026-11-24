@@ -251,3 +251,5 @@ static inline uint64_t ushl_e(uint64_t v, int8_t sh, int bits) {
     if (sh >= bits || -sh >= bits) return 0;
     return sh >= 0 ? v << sh : v >> -sh;
 }
+
+uint32_t rt_scale_f32(uint32_t bits, int kind); /* shadow distance literals x draw distance (rt/shadows.c) */

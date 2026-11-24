@@ -292,3 +292,12 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
   The pad binding is OR-ed with the keyboard binding. Triggers count as pressed above ~27% travel.
 - Not checked with a physical pad: only that the build starts, plays and walks with the keyboard unchanged. There is no
   menu page for pad bindings yet (ini only).
+
+## Shadow distance follows draw_distance (24 Nov 2026)
+- Shadow ranges are float literals inside CShadows, so `recomp/lift.py` (`CONST_SCALE`) rewrites the instructions that load
+  them to `rt_scale_f32(bits, kind)` (rt/shadows.c), scaled by `draw_distance` (1.0..3.0; k for a distance, k^2 for a
+  squared one): StoreShadowForVehicle cut-off 144 u (big) / 18 u (small) with their fade distances, and the squared
+  cut-off of StoreShadowForPedObject (13 u).
+- Checked: five patched literals in the generated code, the build starts and plays a scripted run without a trap.
+  Not compared visually. Left alone because their meaning is unclear: the 40 / 50 unit constants (static and permanent
+  shadows, shadow sector lists) and CDynamicShadows.
