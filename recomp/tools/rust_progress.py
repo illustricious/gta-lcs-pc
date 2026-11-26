@@ -18,10 +18,15 @@ LIB = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'local/extracted/split_
 GAME = re.compile(r'^_ZN\d+([Cc][A-Z]\w*)')  # C*/c* engine classes = game code
 
 
+# Exported from Rust but only wrapping the recompiled original (CCamera::Process): not rewritten, not counted.
+WRAPPERS = {0x328188}
+
+
 def main():
     ported = set()
     for rs in (ROOT / 'recomp' / 'engine' / 'src').rglob('*.rs'):
         ported |= {int(a, 16) for a in re.findall(r'extern "C" fn G_([0-9a-f]+)\(', rs.read_text())}
+    ported -= WRAPPERS
     elf = ELFFile(open(LIB, 'rb'))
     text = elf.get_section_by_name('.text')['sh_size'] // 4
     funcs = {}
