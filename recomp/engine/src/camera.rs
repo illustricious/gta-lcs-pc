@@ -289,6 +289,7 @@ pub unsafe extern "C" fn G_32e310(c: *mut Cpu) {
 
 extern "C" {
     fn G_3135fc_orig(c: *mut Cpu);
+    fn G_328188_orig(c: *mut Cpu);
     fn G_329e10_orig(c: *mut Cpu);
     fn G_329ee8_orig(c: *mut Cpu);
     fn G_329dd4_orig(c: *mut Cpu);
@@ -345,4 +346,38 @@ pub unsafe extern "C" fn G_46f818(c: *mut Cpu) {
 
 extern "C" {
     fn G_46f818_orig(c: *mut Cpu);
+}
+
+// ---- spawn distance of cars and pedestrians --------------------------------------------------------
+
+static GEN_SCALE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0x3f80_0000); // 1.0
+static GEN_WRITTEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// TheCamera.GenerationDistMultiplier: CCarCtrl multiplies its spawn and removal distances (140, 190, 70 units) and
+/// CPopulation its add radius and cull ranges by it.
+const GENERATION_DIST_MULTIPLIER: u64 = 0xf4;
+
+/// Host setting (lcs.ini `draw_distance`, capped because the vehicle and ped pools do not grow).
+#[no_mangle]
+pub extern "C" fn lcs_set_generation_scale(scale: f32) {
+    let s = if scale.is_finite() && scale >= 1.0 { scale.min(2.5) } else { 1.0 };
+    GEN_SCALE.store(s.to_bits(), core::sync::atomic::Ordering::Relaxed);
+}
+
+/// void CCamera::Process(): the original (recompiled C), then the generation distance multiplier it just computed is
+/// scaled. A value equal to the one written last time was not recomputed and is left alone.
+#[no_mangle]
+pub unsafe extern "C" fn G_328188(c: *mut Cpu) {
+    let cam = (*c).x[0];
+    G_328188_orig(c);
+    if verify::enabled() {
+        return;
+    }
+    let a = cam + GENERATION_DIST_MULTIPLIER;
+    let now = rf32(a);
+    if now.to_bits() != GEN_WRITTEN.load(core::sync::atomic::Ordering::Relaxed) {
+        let v = now * f32::from_bits(GEN_SCALE.load(core::sync::atomic::Ordering::Relaxed));
+        w32f(a, v);
+        GEN_WRITTEN.store(v.to_bits(), core::sync::atomic::Ordering::Relaxed);
+    }
 }

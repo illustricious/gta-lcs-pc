@@ -408,6 +408,25 @@ static void teleport(CPU *c) {
     rt_log("diag: teleported to %.1f %.1f %.1f heading %.2f\n", tweaks_teleport[0], tweaks_teleport[1], tweaks_teleport[2], tweaks_teleport[3]);
 }
 
+/* --verbose: once in 120 frames, how far from the player the vehicles are (CPools vehicle pool: entries, flags with the
+ * sign bit set for free slots, size; entry stride 0x7b0, position +0x40). */
+static void vehicle_diag(void) {
+    static unsigned n;
+    if (++n % 120) return;
+    uint64_t players = rt_sym("_ZN6CWorld7PlayersE"), ped = players ? M64(players) : 0;
+    uint64_t pool = M64(M64(G_BASE + 0x7f9720));
+    if (!ped || !pool) return;
+    int bin[3] = {0, 0, 0}; /* traffic rings; scripted and parked cars far away are left out */
+    double px = MF32(ped + 0x40), py = MF32(ped + 0x44);
+    for (unsigned i = 0; i < M32(pool + 0x10) && i < 1000; i++) {
+        if (MS8(M64(pool + 8) + i) < 0) continue;
+        uint64_t v = M64(pool) + 0x7b0ull * i;
+        double dx = MF32(v + 0x40) - px, dy = MF32(v + 0x44) - py, d = sqrt(dx * dx + dy * dy);
+        if (d < 400) bin[d < 80 ? 0 : d < 160 ? 1 : 2]++;
+    }
+    rt_log("diag: vehicles within 80: %d, 80-160: %d, 160-400: %d\n", bin[0], bin[1], bin[2]);
+}
+
 void tweaks_apply(CPU *c) {
     if (tweaks_teleport_pending) teleport(c);
     if (rt_verbose) timing_diag();
@@ -416,6 +435,9 @@ void tweaks_apply(CPU *c) {
         lcs_set_radar(cfg.radar_bottom, cfg.radar_margin, cfg.radar_scale);
         void lcs_set_fov_scale(float scale);
         lcs_set_fov_scale(cfg.fov_scale > 0 ? cfg.fov_scale : 1.0f);
+        { void lcs_set_generation_scale(float s); const char *g = getenv("LCS_GEN"); /* tests: override */
+          lcs_set_generation_scale(g ? (float)atof(g) : cfg.draw_distance); }
+        if (rt_verbose) vehicle_diag();
         { void lcs_set_far_clip_scale(float s); const char *e = getenv("LCS_FAR");
           /* tests: LCS_FAR overrides the factor */
           lcs_set_far_clip_scale(e ? (float)atof(e) : cfg.draw_distance); }

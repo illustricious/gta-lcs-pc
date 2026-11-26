@@ -328,3 +328,15 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
   the current sector draws in detail (overlap), at high crash and memory risk. What still limits the view is the
   detail-to-LOD boundary (about 300 units, baked), not missing far geometry. If far buildings are visibly absent
   somewhere, that needs the position and a screenshot to trace (culling), not more sectors.
+
+## Car and ped spawn distance: TheCamera.GenerationDistMultiplier (Rust, 26 Nov 2026)
+- CCarCtrl spawns and removes cars at literal distances (140, 190, 70 units ...) multiplied by CCamera+0xf4, and
+  CPopulation::ManagePopulation multiplies its add radius and cull range by the same field. CCamera::Process (0x328188)
+  is hooked in `recomp/engine/src/camera.rs`: after the original, +0xf4 is multiplied by `draw_distance` (max 2.5).
+  `LCS_GEN=<factor>` overrides it.
+- This replaces rt/population.c (it scaled only the ped getter radii, which would now be applied twice; cars never
+  moved).
+- Measured with `--verbose` (`diag: vehicles ...`, 40 samples standing in Harwood), factor 1 vs 2: vehicles within
+  80 units 8.9 -> 6.6, 80-160 units 4.2 -> 4.6, 160-400 units 2.2 -> 6.7. Cars exist farther out; the vehicle count
+  does not grow, so the street right around the player is a bit emptier. Peds were not measured.
+- Appearing and disappearing is still instant (no fade-in added); it now happens farther away.
