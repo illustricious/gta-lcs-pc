@@ -340,3 +340,11 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
   80 units 8.9 -> 6.6, 80-160 units 4.2 -> 4.6, 160-400 units 2.2 -> 6.7. Cars exist farther out; the vehicle count
   does not grow, so the street right around the player is a bit emptier. Peds were not measured.
 - Appearing and disappearing is still instant (no fade-in added); it now happens farther away.
+
+## Left stick ignored; analog triggers (26 Nov 2026)
+- Cause of the dead left stick: the default key bindings (foot_move_x/y = A,D / W,S; car_steer_x/y) replaced the
+  stick value even with no key held (host_action_axis returned 0). Now a pushed stick (more than 12%) counts whenever
+  no bound key is held. Likewise, an action that only has a key binding reads the pad button again while a gamepad is
+  the last used device. Checked with a scripted stick (`--axis`): the player walks at 5.3 u/s with the defaults bound.
+- RT / LT on accelerate and brake are analog: the trigger travel (5% dead zone) is passed as 0..255; keys and buttons
+  still give 255. Not checked with a physical pad.

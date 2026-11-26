@@ -216,13 +216,20 @@ int host_pad_ini(const char *key, const char *val) {
         if (!strcmp(name, act_names[a])) { pad_key[veh][a] = (unsigned char)pad_parse(val); act_any = 1; return 1; }
     return 1;
 }
+static int pad_trigger[2];          /* LT / RT travel, 0..255 */
+static unsigned char act_value[2][ACT_COUNT]; /* 0..255: 255 for keys and buttons, the travel for a trigger on accelerate / brake */
 static void pad_snapshot(void) {
     memset(pad_state, 0, sizeof pad_state);
+    pad_trigger[0] = pad_trigger[1] = 0;
     for (int i = 0; i < n_open_pads; i++) {
         SDL_Gamepad *g = open_pads[i];
         for (int b = 1; b < PAD_LT; b++) if (SDL_GetGamepadButton(g, (SDL_GamepadButton)pad_sdl[b])) pad_state[b] = 1;
-        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 9000) pad_state[PAD_LT] = 1;
-        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 9000) pad_state[PAD_RT] = 1;
+        for (int t = 0; t < 2; t++) {
+            int raw = SDL_GetGamepadAxis(g, t ? SDL_GAMEPAD_AXIS_RIGHT_TRIGGER : SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+            if (raw > 9000) pad_state[t ? PAD_RT : PAD_LT] = 1;
+            int v = raw > 1600 ? (raw - 1600) * 255 / (32767 - 1600) : 0; /* 5% dead zone */
+            if (v > pad_trigger[t]) pad_trigger[t] = v;
+        }
     }
 }
 static int act_held(const bool *ks, int k) {
@@ -249,8 +256,10 @@ static void actions_frame(const bool *ks_in) {
         for (int a = 0; a < ACT_COUNT; a++) {
             act_prev[v][a] = act_now[v][a];
             int neg = act_held(ks, act_key[v][a][0]), pos = act_held(ks, act_key[v][a][1]);
-            int pd = pad_key[v][a] && pad_state[pad_key[v][a]];
-            act_now[v][a] = (unsigned char)(neg || pd);
+            int pb = pad_key[v][a], pd = pb && pad_state[pb], val = neg || pd ? 255 : 0;
+            if ((a == ACT_ACCELERATE || a == ACT_BRAKE) && (pb == PAD_LT || pb == PAD_RT) && !neg) val = pad_trigger[pb == PAD_RT];
+            act_value[v][a] = (unsigned char)val;
+            act_now[v][a] = (unsigned char)(val > 0);
             act_axis[v][a] = (signed char)((pos - neg) * 127);
         }
 }
@@ -293,13 +302,27 @@ void host_act_clear(int veh) {
     for (int a = 0; a < ACT_COUNT; a++) act_save(veh != 0, a);
     act_recount();
 }
+static int last_value;
+static float pad_axis[6], script_axis[6];
 int host_action(int a, int vehicle) {
-    if (a < 0 || a >= ACT_COUNT || (!act_key[vehicle != 0][a][0] && !pad_key[vehicle != 0][a])) return -1;
-    return act_now[vehicle != 0][a] | act_prev[vehicle != 0][a] << 1;
+    int v = vehicle != 0;
+    if (a < 0 || a >= ACT_COUNT || (!act_key[v][a][0] && !pad_key[v][a])) return -1;
+    int s = act_now[v][a] | act_prev[v][a] << 1;
+    /* only a keyboard binding, its key idle, and a gamepad in use: the pad's own button counts */
+    if (!pad_key[v][a] && !s && plat.pad_input) return -1;
+    last_value = act_value[v][a];
+    return s;
 }
+/* value (0..255) of the action the last host_action() call answered for */
+int host_action_value(void) { return last_value; }
 int host_action_axis(int a, int vehicle) {
-    if (a < 0 || a >= ACT_COUNT || (!act_key[vehicle != 0][a][0] && !act_key[vehicle != 0][a][1])) return INT32_MIN;
-    return act_axis[vehicle != 0][a] * 128 / 127;
+    int v = vehicle != 0;
+    if (a < 0 || a >= ACT_COUNT || (!act_key[v][a][0] && !act_key[v][a][1])) return INT32_MIN;
+    int val = act_axis[v][a] * 128 / 127;
+    /* a key binding must not cancel the stick: with no key held, a pushed stick counts */
+    int idx = a == ACT_MOVE_X || a == ACT_STEER_X ? 0 : 1;
+    if (!val && fabsf(pad_axis[idx] + script_axis[idx]) > 0.12f) return INT32_MIN;
+    return val;
 }
 
 static int held[B_COUNT];       /* number of host inputs currently holding each guest button */
@@ -307,7 +330,7 @@ static float axis_sent[6];
 static int gamepads;
 static float mouse_dx, mouse_dy;
 static int touch_down;
-static float script_axis[6];    /* --axis overrides, added to real input */
+/* script_axis (declared above): --axis overrides, added to real input */
 
 static void touch(const char *fn, float x, float y);
 static int title_touch;

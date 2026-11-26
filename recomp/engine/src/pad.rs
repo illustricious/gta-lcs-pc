@@ -43,6 +43,8 @@ enum Act {
 extern "C" {
     /// -1 when the action has no binding in this context, else bit 0 = held now, bit 1 = held last frame.
     fn host_action(action: i32, vehicle: i32) -> i32;
+    /// 0..255, for the action the last host_action call answered.
+    fn host_action_value() -> i32;
     /// i32::MIN when unbound, else -128..128.
     fn host_action_axis(action: i32, vehicle: i32) -> i32;
     /// Non-zero when any per-action binding exists.
@@ -78,7 +80,8 @@ unsafe fn bound_axis(c: &mut Cpu, a: Act) -> Option<i32> {
 /// Button value of the new state (`off` from the pad) or of the binding (255 / 0).
 unsafe fn held(c: &mut Cpu, pad: u64, off: u64, a: Act) -> u16 {
     match bound(c, a) {
-        Some((now, _)) => if now { 255 } else { 0 },
+        // 255 for keys and buttons; a trigger bound to accelerate or brake gives its travel
+        Some((now, _)) => if now { host_action_value() as u16 } else { 0 },
         None => r16(pad + off),
     }
 }
