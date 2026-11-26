@@ -10,6 +10,7 @@
 //! is switched off while verifying so the ports must match the original bit for bit.
 #![no_std]
 
+mod animation;
 mod camera;
 mod cpu;
 mod guest;
@@ -19,6 +20,7 @@ mod lod;
 mod mem;
 mod pad;
 mod timecycle;
+mod transmission;
 pub mod verify;
 
 pub use cpu::Cpu;

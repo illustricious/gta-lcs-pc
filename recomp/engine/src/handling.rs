@@ -1,8 +1,7 @@
-//! cHandlingDataMgr::ConvertDataToGameUnits, rewritten from libGame.so 2.4.379, with per-vehicle overrides.
+//! cHandlingDataMgr::ConvertDataToGameUnits, rewritten from libGame.so 2.4.379 (behaviour unchanged).
 //!
 //! LoadHandlingData reads handling.cfg into tHandlingData records (human units) and calls this once per vehicle to
-//! turn them into per-tick engine units. New behaviour (off while verifying): lcs.ini factors on the top speed,
-//! acceleration and brake values are applied to the raw record first.
+//! turn them into per-tick engine units. cTransmission is in transmission.rs.
 //!
 //! tHandlingData fields used: +0x00 f32 mass, +0x0c f32 turn mass factor, +0x10 u32 handling id, +0x14 f32 (set to
 //! 1/mass), +0x18 f32 drag, +0x2c u8 percent submerged, +0x30 f32 buoyancy (out), +0x34 the transmission
@@ -15,53 +14,10 @@ use crate::guest::{call, fma};
 use crate::mem::*;
 use crate::verify::{self, Ret};
 
-const GET_HANDLING_ID: u64 = 0x4ec3f8; // cHandlingDataMgr::GetHandlingId(const char *)
 const INIT_GEAR_RATIOS: u64 = 0x7d74e0; // PLT: cTransmission::InitGearRatios
-const HANDLING_COUNT: u64 = 0x51;
 
 extern "C" {
     fn G_4ec4d4_orig(c: *mut Cpu);
-    /// Override `i` from lcs.ini; 0 past the end. `name` is null for all vehicles, `field` 0 top speed,
-    /// 1 acceleration, 2 brake.
-    fn host_handling_entry(i: i32, name: *mut *const u8, field: *mut i32, factor: *mut f32) -> i32;
-    fn host_handling_applied(id: u32, field: i32, before: f32, after: f32);
-}
-
-unsafe fn apply_overrides(c: &mut Cpu, this: u64, h: u64) {
-    let id = r32(h + 0x10) as u64;
-    let mut factor = [1.0f32; 3];
-    let mut own = [false; 3];
-    let mut i = 0;
-    loop {
-        let mut name: *const u8 = core::ptr::null();
-        let (mut field, mut k) = (0i32, 1.0f32);
-        if host_handling_entry(i, &mut name, &mut field, &mut k) == 0 {
-            break;
-        }
-        i += 1;
-        if !(0..3).contains(&field) {
-            continue;
-        }
-        let f = field as usize;
-        if name.is_null() {
-            if !own[f] {
-                factor[f] = k;
-            }
-        } else {
-            let found = call(c, GET_HANDLING_ID, &[this, name as u64]).0 & 0xffff_ffff;
-            if found < HANDLING_COUNT && found == id {
-                factor[f] = k;
-                own[f] = true; // a vehicle's own line beats the all-vehicle one
-            }
-        }
-    }
-    for (f, off) in [0x88u64, 0x80, 0x98].iter().enumerate() {
-        if factor[f] != 1.0 {
-            let before = rf32(h + off);
-            w32f(h + off, before * factor[f]);
-            host_handling_applied(id as u32, f as i32, before, before * factor[f]);
-        }
-    }
 }
 
 unsafe fn convert(c: &mut Cpu, h: u64) {
@@ -121,11 +77,6 @@ unsafe fn convert(c: &mut Cpu, h: u64) {
 /// void cHandlingDataMgr::ConvertDataToGameUnits(tHandlingData *)
 #[no_mangle]
 pub unsafe extern "C" fn G_4ec4d4(c: *mut Cpu) {
-    let (this, h) = ((*c).x[0], (*c).x[1]);
-    verify::port_regions(c, G_4ec4d4_orig, Ret::None, &[(h, 0xa0)], |c| {
-        if !verify::enabled() {
-            apply_overrides(c, this, h);
-        }
-        convert(c, h);
-    });
+    let h = (*c).x[1];
+    verify::port_regions(c, G_4ec4d4_orig, Ret::None, &[(h, 0xa0)], |c| convert(c, h));
 }

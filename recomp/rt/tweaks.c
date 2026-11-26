@@ -67,8 +67,6 @@ static const char *DEFAULT_INI =
     "; seconds of cross-fade between world sectors when the streamed sector swaps in (hides the LOD pop-in); 0 = off\n"
     "world_fade=0\n"
     "\n"
-    "; vehicle handling factors (0.25 .. 4.0), read at start-up. All vehicles: handling_top_speed, handling_acceleration,\n"
-    "; handling_brake. One vehicle: handling_<NAME>_<field>, e.g. handling_KURUMA_top_speed=1.3 (names: recomp/SETTINGS.md)\n"
     "\n"
     "; draw distance: 1.0 = original, up to 3.0 (vehicles, peds, small objects, far clip)\n"
     "draw_distance=2.0\n"
@@ -86,41 +84,6 @@ static const char *DEFAULT_INI =
     "\n"
     "; main menu: 1 = list on the left, 0 = original carousel\n"
     "definitive_menu=1\n";
-
-/* handling_top_speed / handling_acceleration / handling_brake = factor for every vehicle, or
- * handling_<NAME>_<field> for one vehicle (handling.cfg name, e.g. handling_INFERNUS_top_speed=1.3). Read when the
- * game loads its handling data (recomp/engine/src/handling.rs). */
-static struct { char name[16]; int field; float factor; } handling[64];
-static int nhandling;
-static void handling_ini(const char *key, const char *val) {
-    static const char *fields[3] = {"top_speed", "acceleration", "brake"};
-    size_t n = strlen(key);
-    for (int f = 0; f < 3; f++) {
-        size_t m = strlen(fields[f]);
-        if (n < m || strcmp(key + n - m, fields[f])) continue;
-        float k = (float)atof(val);
-        if (!(k >= 0.25f && k <= 4.0f) || nhandling >= 64) return;
-        size_t len = n > m ? n - m - 1 : 0; /* name part before the last underscore */
-        if (len >= sizeof handling[0].name) return;
-        memcpy(handling[nhandling].name, key, len);
-        handling[nhandling].name[len] = 0;
-        handling[nhandling].field = f;
-        handling[nhandling++].factor = k;
-        return;
-    }
-}
-int host_handling_entry(int i, const char **name, int *field, float *factor) {
-    if (i < 0 || i >= nhandling) return 0;
-    *name = handling[i].name[0] ? handling[i].name : 0;
-    *field = handling[i].field;
-    *factor = handling[i].factor;
-    return 1;
-}
-void host_handling_applied(uint32_t id, int field, float before, float after) {
-    /* names: the 14-byte records GetHandlingId searches (GOT slot 0x7fcc88) */
-    const char *name = id < 0x51 ? (const char *)(M64(G_BASE + 0x7fcc88) + 14ull * id) : "?";
-    if (rt_verbose) rt_log("handling: id %u %.14s field %d %.1f -> %.1f\n", id, name, field, before, after);
-}
 
 void tweaks_set(const char *line, const char *val) {
     if (!strcmp(line, "fullscreen")) plat.display_mode = atoi(val) ? 1 : 0; /* older lcs.ini */
@@ -143,7 +106,6 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strncmp(line, "foot_", 5) || !strncmp(line, "car_", 4)) { int host_action_ini(const char *, const char *); host_action_ini(line, val); }
     else if (!strncmp(line, "padfoot_", 8) || !strncmp(line, "padcar_", 7)) { int host_pad_ini(const char *, const char *); host_pad_ini(line, val); }
     else if (!strcmp(line, "pad_preset")) { void host_pad_preset(int); host_pad_preset(!strcmp(val, "classic")); }
-    else if (!strncmp(line, "handling_", 9)) handling_ini(line + 9, val);
     else if (!strcmp(line, "mouse_look")) plat.mouse_look = atoi(val);
     else if (!strcmp(line, "mouse_sensitivity")) plat.mouse_sensitivity = (float)atof(val);
     else if (!strcmp(line, "definitive_menu")) frontend_set_enabled(atoi(val) != 0);
@@ -467,6 +429,7 @@ static void vehicle_diag(void) {
 }
 
 void tweaks_apply(CPU *c) {
+    { void port_test(CPU *c); port_test(c); }
     if (tweaks_teleport_pending) teleport(c);
     if (rt_verbose) timing_diag();
     {   /* radar position and size: Rust ports of the CHud radar getters (recomp/engine/src/hud.rs) */

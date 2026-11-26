@@ -349,18 +349,16 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - RT / LT on accelerate and brake are analog: the trigger travel (5% dead zone) is passed as 0..255; keys and buttons
   still give 255. Not checked with a physical pad.
 
-## Vehicle handling overrides; ConvertDataToGameUnits in Rust (26 Nov 2026)
-- `cHandlingDataMgr::ConvertDataToGameUnits` (0x4ec4d4) is a Rust port (`recomp/engine/src/handling.rs`), run under
-  `LCS_RS_VERIFY=1` with 0 mismatches.
-- lcs.ini (read at start-up; restart to apply), factor 0.25..4.0, applied to the handling.cfg value before conversion:
-  `handling_top_speed`, `handling_acceleration`, `handling_brake` for all vehicles, or `handling_<NAME>_<field>` for one
-  vehicle, which beats the all-vehicle line. Example: `handling_KURUMA_acceleration=2.0`. Also `--set <key> <value>`.
-  `--verbose` logs every value changed. Off while verifying.
-- Names: LANDSTAL IDAHO STINGER LINERUN PEREN SENTINEL PATRIOT FIRETRUK TRASH STRETCH MANANA INFERNUS PONY MULE CHEETAH
-  AMBULAN FBICAR MOONBEAM ESPERANT TAXI KURUMA BOBCAT MRWHOOP BFINJECT POLICE ENFORCER SECURICA BANSHEE BUS RHINO
-  BARRACKS TRAIN HELI DODO COACH CABBIE STALLION RUMPO RCBANDIT MAFIA AIRTRAIN DEADDODO FLATBED YANKEE BLISTA BELLYUP
-  MRWONGS YARDIE YAKUZA DIABLOS COLUMB HOODS PANLANT BORGNINE CAMPVAN BALLOT SPIDER SHELBY PONTIAC ESPRIT MINI HOTROD
-  SINDACCO FORELLI BIKE MOPED DIRTBIKE ANGEL DIRTBIK2 ANGE2 FREEWAY PREDATOR SPEEDER REEFER FERRY MAVERICK COASTMAV
-  POLMAV HUNTER RCGOBLIN RCCOPTER
-- Checked: the values change at load (e.g. KURUMA top speed 160 -> 240, acceleration 7.6 -> 15.2). The effect while
-  driving has not been measured. Grip / traction is not exposed yet; bikes, boats and aircraft keep their extra data.
+## Handling, transmission and animation playback in Rust (26 Nov 2026)
+Faithful ports, no behaviour change (the handling override factors tried the same day were removed again).
+- `handling.rs`: cHandlingDataMgr::ConvertDataToGameUnits.
+- `transmission.rs`: cTransmission InitGearRatios, CalculateGearForSimpleCar, CalculateDriveAcceleration.
+- `animation.rs`: CAnimBlendAssociation UpdateBlend, UpdateTime, SetCurrentTime, SyncAnimation, Start, SetBlend,
+  SetBlendTo; CAnimBlendNode UpdateTime, NextKeyFrameNoCalc.
+- Verified with `LCS_RS_VERIFY=1`: scripted sessions reach the handling and transmission ports and
+  CAnimBlendAssociation::Start (5.1M port calls overall, 0 mismatches). The other animation ports were not reached in
+  play; `LCS_PORT_TEST=1` (rt/porttest.c) feeds them 4000 rounds of random records at start-up: 0 mismatches. Paths
+  that call back into the game (key frame lookup, delete, callbacks) are not covered by either.
+- Not ported: the per-frame pose update the game actually runs (RslAnimBlendElementGroupUpdateAnimations, 0x2e8e20,
+  CAnimBlendNode::Update) and vehicle physics. Most of the ported playback methods are inlined there, so they run less
+  often than their names suggest.
