@@ -5,6 +5,13 @@ void tweaks_load(const char *root);
 void tweaks_set(const char *key, const char *value); /* same keys as lcs.ini */
 void tweaks_apply(CPU *c);
 float tweaks_world_fade(void);
+void tweaks_fx(float out[6]); /* sharpen, fxaa, vignette, brightness, contrast, saturation */
+float tweaks_fx_get(int i);
+void tweaks_fx_set(int i, float v);
+int tweaks_look(void);
+void tweaks_set_look(int look);
+int tweaks_hud_shown(int part); /* 0 whole HUD, 1 clock, 2 money, 3 health, 4 armour */
+void tweaks_set_hud_shown(int part, int shown);
 float tweaks_draw_distance(void);
 void tweaks_set_draw_distance(float k);
 float tweaks_res_scale(void);

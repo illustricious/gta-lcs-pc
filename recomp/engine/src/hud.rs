@@ -222,3 +222,37 @@ extern "C" {
     fn G_358b98_orig(c: *mut Cpu);
     fn G_358bd8_orig(c: *mut Cpu);
 }
+
+// ---- showing and hiding HUD parts ------------------------------------------------------------------
+
+static HIDDEN: AtomicU32 = AtomicU32::new(0); // bit 0 whole HUD, 1 clock, 2 money, 3 health, 4 armour
+
+/// Host setting (lcs.ini `hud*`, SETTINGS > HUD).
+#[no_mangle]
+pub extern "C" fn lcs_set_hud(hidden: i32) {
+    HIDDEN.store(hidden as u32, Ordering::Relaxed);
+}
+
+/// The recompiled draw function, skipped when its part is hidden (never while verifying).
+macro_rules! hud_part {
+    ($name:ident, $orig:ident, $bit:expr) => {
+        #[no_mangle]
+        pub unsafe extern "C" fn $name(c: *mut Cpu) {
+            if verify::enabled() || HIDDEN.load(Ordering::Relaxed) & (1 << $bit) == 0 {
+                $orig(c);
+            }
+        }
+    };
+}
+extern "C" {
+    fn G_47db64_orig(c: *mut Cpu);
+    fn G_483db0_orig(c: *mut Cpu);
+    fn G_482950_orig(c: *mut Cpu);
+    fn G_482b48_orig(c: *mut Cpu);
+    fn G_483364_orig(c: *mut Cpu);
+}
+hud_part!(G_47db64, G_47db64_orig, 0); // CHud::Draw
+hud_part!(G_483db0, G_483db0_orig, 1); // CHud::DrawTime
+hud_part!(G_482950, G_482950_orig, 2); // CHud::DrawCash
+hud_part!(G_482b48, G_482b48_orig, 3); // CHud::DrawHealthBar
+hud_part!(G_483364, G_483364_orig, 4); // CHud::DrawArmourBar

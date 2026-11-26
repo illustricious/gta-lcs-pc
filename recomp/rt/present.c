@@ -10,6 +10,7 @@
 #include <SDL3/SDL_opengles2.h>
 #include "platform.h"
 #include "rt.h"
+#include "tweaks.h"
 
 extern unsigned rt_gl_default_fb;
 
@@ -37,6 +38,7 @@ F(void, GetVertexAttribiv, (GLuint, GLenum, GLint *)); F(void, GetVertexAttribPo
 F(void, VertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *));
 F(void, EnableVertexAttribArray, (GLuint)); F(void, DisableVertexAttribArray, (GLuint));
 F(void, DrawArrays, (GLenum, GLint, GLsizei));
+F(void, Uniform2f, (GLint, GLfloat, GLfloat)); F(void, Uniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat));
 #undef F
 
 static GLuint fbo, color, depth, program, vbo;
@@ -52,9 +54,47 @@ static int load(void) {
     L(BindAttribLocation); L(LinkProgram); L(GetProgramiv); L(UseProgram); L(GetUniformLocation); L(Uniform1i);
     L(GenBuffers); L(BindBuffer); L(BufferData); L(GetVertexAttribiv); L(GetVertexAttribPointerv);
     L(VertexAttribPointer); L(EnableVertexAttribArray); L(DisableVertexAttribArray); L(DrawArrays);
+    L(Uniform2f); L(Uniform4f);
 #undef L
     return 1;
 }
+
+/* Screen effects on the finished frame (lcs.ini fx_*, SETTINGS > SCREEN EFFECTS): FXAA-style edge smoothing,
+ * contrast-adaptive sharpening, colour (brightness, contrast, saturation) and a vignette. px = one scene pixel in
+ * texture units, fx = (sharpen, fxaa, vignette, unused), col = (brightness, contrast, saturation, unused). */
+static const char *FS =
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+    "precision highp float;\n"
+    "#else\n"
+    "precision mediump float;\n"
+    "#endif\n"
+    "varying vec2 uv; uniform sampler2D t; uniform vec2 px; uniform vec4 fx; uniform vec4 col;\n"
+    "float luma(vec3 c){return dot(c,vec3(0.299,0.587,0.114));}\n"
+    "void main(){\n"
+    "  vec3 c=texture2D(t,uv).rgb;\n"
+    "  if(fx.x>0.0||fx.y>0.5){\n"
+    "    vec3 n=texture2D(t,uv+vec2(0.0,-px.y)).rgb, s=texture2D(t,uv+vec2(0.0,px.y)).rgb;\n"
+    "    vec3 w=texture2D(t,uv+vec2(-px.x,0.0)).rgb, e=texture2D(t,uv+vec2(px.x,0.0)).rgb;\n"
+    "    vec3 lo=min(c,min(min(n,s),min(w,e))), hi=max(c,max(max(n,s),max(w,e)));\n"
+    "    if(fx.y>0.5&&luma(hi)-luma(lo)>max(0.05,luma(hi)*0.125)){\n"
+    "      vec2 d=vec2(luma(s)-luma(n),luma(w)-luma(e));\n"
+    "      d=clamp(d/(min(abs(d.x),abs(d.y))+0.05),-2.0,2.0)*px;\n"
+    "      vec3 a=0.5*(texture2D(t,uv-d*0.17).rgb+texture2D(t,uv+d*0.17).rgb);\n"
+    "      vec3 b=0.5*a+0.25*(texture2D(t,uv-d*0.5).rgb+texture2D(t,uv+d*0.5).rgb);\n"
+    "      c=(luma(b)<luma(lo)||luma(b)>luma(hi))?a:b;\n"
+    "    }\n"
+    "    if(fx.x>0.0){\n"
+    "      vec3 amount=sqrt(clamp(min(lo,1.0-hi)/max(hi,vec3(0.001)),0.0,1.0));\n"
+    "      vec3 k=-amount*mix(0.0,0.2,fx.x);\n"
+    "      c=clamp((c+(n+s+w+e)*k)/(1.0+4.0*k),0.0,1.0);\n"
+    "    }\n"
+    "  }\n"
+    "  c=mix(vec3(luma(c)),c,col.z);\n"
+    "  c=(c-0.5)*col.y+0.5;\n"
+    "  c*=col.x;\n"
+    "  if(fx.z>0.0){vec2 q=uv-0.5; c*=1.0-fx.z*smoothstep(0.25,0.75,length(q));}\n"
+    "  gl_FragColor=vec4(clamp(c,0.0,1.0),1.0);\n"
+    "}\n";
 
 static GLuint shader(GLenum type, const char *src) {
     GLuint s = pCreateShader(type);
@@ -87,7 +127,7 @@ void present_init(int w, int h) {
         return;
     }
     GLuint vs = shader(GL_VERTEX_SHADER, "attribute vec4 a; varying vec2 uv; void main(){gl_Position=vec4(a.xy,0.0,1.0);uv=a.zw;}");
-    GLuint fs = shader(GL_FRAGMENT_SHADER, "precision mediump float; varying vec2 uv; uniform sampler2D t; void main(){gl_FragColor=vec4(texture2D(t,uv).rgb,1.0);}");
+    GLuint fs = shader(GL_FRAGMENT_SHADER, FS);
     program = pCreateProgram(); pAttachShader(program, vs); pAttachShader(program, fs);
     pBindAttribLocation(program, 0, "a"); pLinkProgram(program);
     GLint ok = 0; pGetProgramiv(program, GL_LINK_STATUS, &ok);
@@ -145,6 +185,13 @@ void present_frame(void) {
     GLint filter = ((int)(dw + 0.5f) == scene_w && (int)(dh + 0.5f) == scene_h) ? GL_NEAREST : GL_LINEAR;
     pTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter); pTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
     pUseProgram(program); pUniform1i(pGetUniformLocation(program, "t"), 0);
+    {
+        float v[6];
+        tweaks_fx(v); /* sharpen, fxaa, vignette, brightness, contrast, saturation */
+        pUniform2f(pGetUniformLocation(program, "px"), 1.0f / scene_w, 1.0f / scene_h);
+        pUniform4f(pGetUniformLocation(program, "fx"), v[0], v[1], v[2], 0);
+        pUniform4f(pGetUniformLocation(program, "col"), v[3], v[4], v[5], 0);
+    }
     pBindBuffer(GL_ARRAY_BUFFER, vbo); pBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STREAM_DRAW);
     pVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0); pEnableVertexAttribArray(0);
     pDrawArrays(GL_TRIANGLE_STRIP, 0, 4);

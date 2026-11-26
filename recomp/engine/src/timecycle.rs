@@ -265,6 +265,48 @@ unsafe fn scale_far_clip(this: u64) {
     }
 }
 
+static LOOK: [core::sync::atomic::AtomicU32; 3] = [
+    core::sync::atomic::AtomicU32::new(0x3f80_0000),
+    core::sync::atomic::AtomicU32::new(0x3f80_0000),
+    core::sync::atomic::AtomicU32::new(0x3f80_0000),
+];
+
+/// Host colour preset (lcs.ini `look`): share of the colour filter tint that is kept (1 = original, 0 = neutral),
+/// factor on the fog start distance, factor on the ambient light.
+#[no_mangle]
+pub extern "C" fn lcs_set_look(tint: f32, fog: f32, ambient: f32) {
+    for (slot, v) in LOOK.iter().zip([tint, fog, ambient]) {
+        let v = if v.is_finite() && v >= 0.0 && v <= 8.0 { v } else { 1.0 };
+        slot.store(v.to_bits(), core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// New behaviour (off while verifying): the preset applied to this update, before the colour channels are brought to
+/// 0..1 and before the camera takes its copy of the colour filter (+0x2bbc..0x2bc4).
+unsafe fn apply_look(this: u64) {
+    if verify::enabled() {
+        return;
+    }
+    let get = |i: usize| f32::from_bits(LOOK[i].load(core::sync::atomic::Ordering::Relaxed));
+    let (tint, fog, ambient) = (get(0), get(1), get(2));
+    if tint != 1.0 {
+        let c = [rf32(this + 0x2bbc), rf32(this + 0x2bc0), rf32(this + 0x2bc4)];
+        let grey = (c[0] + c[1] + c[2]) / 3.0;
+        for (i, v) in c.iter().enumerate() {
+            w32f(this + 0x2bbc + 4 * i as u64, grey + (v - grey) * tint);
+        }
+    }
+    if fog != 1.0 {
+        w32f(this + 0x2b90, rf32(this + 0x2b90) * fog);
+    }
+    if ambient != 1.0 {
+        for i in 0..6u64 {
+            let a = this + 0x2b00 + 4 * i;
+            w32f(a, rf32(a) * ambient);
+        }
+    }
+}
+
 unsafe fn force_update(c: &mut Cpu, this: u64) {
     // position within the hour, and within the weather change
     let seconds = r8(got(GOT_SECONDS)) as f32;
@@ -304,6 +346,7 @@ unsafe fn force_update(c: &mut Cpu, this: u64) {
     sun_direction(c, this);
     extra_colour(this);
     scale_far_clip(this);
+    apply_look(this);
 
     // motion blur colour of TheCamera (inverted), for the default blur types
     let cam = got(GOT_THE_CAMERA);

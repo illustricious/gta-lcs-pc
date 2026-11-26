@@ -365,3 +365,16 @@ Faithful ports, no behaviour change (the handling override factors tried the sam
   the live path is covered only by a scripted walk / run session without a crash and with normal-looking animation.
 - Not ported: the pose evaluation itself (the ForAllNodes callbacks, CAnimBlendNode::Update, key frame
   interpolation) and vehicle physics.
+
+## Screen effects, colour looks and HUD parts (26 Nov 2026)
+- SETTINGS > SCREEN EFFECTS and SETTINGS > HUD (menu), or lcs.ini / `--set`. Everything defaults to the original look.
+- Screen effects (rt/present.c, one pass on the finished frame, so HUD and menus are affected too): `fx_sharpen` 0..1
+  (contrast-adaptive), `fx_fxaa` 0/1, `fx_vignette` 0..1, `fx_brightness` / `fx_contrast` 0.7..1.4,
+  `fx_saturation` 0..1.6.
+- `look=original|natural|clear|moody` (Rust, timecycle.rs `apply_look`, off while verifying): natural keeps 10% of the
+  weather colour filter tint (less yellow), clear is natural with fog starting 3x farther, moody is 75% ambient light.
+- HUD parts: `hud` (everything CHud::Draw draws, including radar and on-screen messages), `hud_clock`, `hud_money`,
+  `hud_health`, `hud_armour`. These skip the recompiled draw functions from Rust wrappers (hud.rs); the HUD drawing
+  itself is not ported. Radar position and size moved from the GRAPHICS page to the HUD page.
+- Checked with screenshots: both menu pages, looks and effects in a scripted run, HUD parts hidden. Not tuned on other
+  weather types or times of day.

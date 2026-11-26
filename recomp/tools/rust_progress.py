@@ -18,8 +18,8 @@ LIB = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'local/extracted/split_
 GAME = re.compile(r'^_ZN\d+([Cc][A-Z]\w*)')  # C*/c* engine classes = game code
 
 
-# Exported from Rust but only wrapping the recompiled original (CCamera::Process): not rewritten, not counted.
-WRAPPERS = {0x328188}
+# Exported from Rust but only wrapping the recompiled original (CCamera::Process, the CHud draw parts): not rewritten.
+WRAPPERS = {0x328188, 0x47db64, 0x483db0, 0x482950, 0x482b48, 0x483364}
 
 
 def main():

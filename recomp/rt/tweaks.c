@@ -28,9 +28,12 @@ typedef struct Settings {
     float fov_scale;     /* field of view factor (Rust CDraw::SetFOV) */
     float camera_distance; /* on-foot camera distance factor (CCam::Process_FollowPed_SA parameter table) */
     float world_fade;    /* seconds of cross-fade between world sectors at a swap; 0 = off */
+    float fx[6];         /* sharpen, fxaa, vignette, brightness, contrast, saturation */
+    int look;            /* colour preset of the time cycle: 0 original, 1 natural, 2 clear, 3 moody */
+    int hud_hidden;      /* bit 0 whole HUD, 1 clock, 2 money, 3 health, 4 armour */
     int touch_controls;  /* draw the Android on-screen controls */
 } Settings;
-static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f};
+static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f, .fx = {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f}};
 static char ini_path[600];
 
 static const char *DEFAULT_INI =
@@ -68,6 +71,22 @@ static const char *DEFAULT_INI =
     "world_fade=0\n"
     "\n"
     "\n"
+    "; colour preset: original, natural (less yellow), clear (natural + less haze), moody (darker ambient light)\n"
+    "look=original\n"
+    "; screen effects: fx_sharpen 0..1, fx_fxaa 0/1, fx_vignette 0..1, fx_brightness / fx_contrast 0.7..1.4, fx_saturation 0..1.6\n"
+    "fx_sharpen=0\n"
+    "fx_fxaa=0\n"
+    "fx_vignette=0\n"
+    "fx_brightness=1.0\n"
+    "fx_contrast=1.0\n"
+    "fx_saturation=1.0\n"
+    "; HUD parts, 1 = shown: hud (everything, including messages), hud_clock, hud_money, hud_health, hud_armour\n"
+    "hud=1\n"
+    "hud_clock=1\n"
+    "hud_money=1\n"
+    "hud_health=1\n"
+    "hud_armour=1\n"
+    "\n"
     "; draw distance: 1.0 = original, up to 3.0 (vehicles, peds, small objects, far clip)\n"
     "draw_distance=2.0\n"
     "\n"
@@ -85,7 +104,45 @@ static const char *DEFAULT_INI =
     "; main menu: 1 = list on the left, 0 = original carousel\n"
     "definitive_menu=1\n";
 
+/* screen effects, colour preset and HUD parts: lcs.ini names and allowed ranges */
+static const struct { const char *key; float lo, hi; } fx_keys[6] = {
+    {"fx_sharpen", 0, 1}, {"fx_fxaa", 0, 1}, {"fx_vignette", 0, 1}, {"fx_brightness", 0.7f, 1.4f},
+    {"fx_contrast", 0.7f, 1.4f}, {"fx_saturation", 0, 1.6f}};
+static const char *look_names[4] = {"original", "natural", "clear", "moody"};
+static const char *hud_keys[5] = {"hud", "hud_clock", "hud_money", "hud_health", "hud_armour"};
+static float fx_clamp(int i, float v) { return v < fx_keys[i].lo ? fx_keys[i].lo : v > fx_keys[i].hi ? fx_keys[i].hi : v; }
+void tweaks_fx(float out[6]) { memcpy(out, cfg.fx, sizeof cfg.fx); }
+float tweaks_fx_get(int i) { return i >= 0 && i < 6 ? cfg.fx[i] : 0; }
+void tweaks_fx_set(int i, float v) {
+    if (i < 0 || i > 5) return;
+    cfg.fx[i] = fx_clamp(i, v);
+    char t[32]; snprintf(t, sizeof t, "%.2f", cfg.fx[i]); tweaks_save(fx_keys[i].key, t);
+}
+int tweaks_look(void) { return cfg.look; }
+void tweaks_set_look(int look) { cfg.look = (look + 4) % 4; tweaks_save("look", look_names[cfg.look]); }
+int tweaks_hud_shown(int part) { return !(cfg.hud_hidden & (1 << part)); }
+void tweaks_set_hud_shown(int part, int shown) {
+    if (part < 0 || part > 4) return;
+    cfg.hud_hidden = shown ? cfg.hud_hidden & ~(1 << part) : cfg.hud_hidden | (1 << part);
+    tweaks_save(hud_keys[part], shown ? "1" : "0");
+}
+static int visual_ini(const char *key, const char *val) {
+    for (int i = 0; i < 6; i++)
+        if (!strcmp(key, fx_keys[i].key)) { cfg.fx[i] = fx_clamp(i, (float)atof(val)); return 1; }
+    if (!strcmp(key, "look")) {
+        for (int i = 0; i < 4; i++) if (!strcmp(val, look_names[i])) cfg.look = i;
+        return 1;
+    }
+    for (int i = 0; i < 5; i++)
+        if (!strcmp(key, hud_keys[i])) {
+            cfg.hud_hidden = atoi(val) ? cfg.hud_hidden & ~(1 << i) : cfg.hud_hidden | (1 << i);
+            return 1;
+        }
+    return 0;
+}
+
 void tweaks_set(const char *line, const char *val) {
+    if (visual_ini(line, val)) return;
     if (!strcmp(line, "fullscreen")) plat.display_mode = atoi(val) ? 1 : 0; /* older lcs.ini */
     else if (!strcmp(line, "display_mode")) plat.display_mode = !strcmp(val, "windowed") ? 0 : !strcmp(val, "exclusive") ? 2 : 1;
     else if (!strcmp(line, "pause_on_focus_loss")) plat.pause_on_focus_loss = atoi(val);
@@ -437,6 +494,12 @@ void tweaks_apply(CPU *c) {
         lcs_set_radar(cfg.radar_bottom, cfg.radar_margin, cfg.radar_scale);
         void lcs_set_fov_scale(float scale);
         lcs_set_fov_scale(cfg.fov_scale > 0 ? cfg.fov_scale : 1.0f);
+        {   /* colour preset: share of the weather colour filter tint kept, fog start factor, ambient light factor */
+            static const float looks[4][3] = {{1.0f, 1.0f, 1.0f}, {0.1f, 1.0f, 1.0f}, {0.1f, 3.0f, 1.0f}, {1.0f, 1.0f, 0.75f}};
+            void lcs_set_look(float tint, float fog, float ambient); void lcs_set_hud(int hidden);
+            lcs_set_look(looks[cfg.look][0], looks[cfg.look][1], looks[cfg.look][2]);
+            lcs_set_hud(cfg.hud_hidden);
+        }
         { void lcs_set_generation_scale(float s); const char *g = getenv("LCS_GEN"); /* tests: override */
           lcs_set_generation_scale(g ? (float)atof(g) : cfg.draw_distance); }
         if (rt_verbose) vehicle_diag();

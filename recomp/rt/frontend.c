@@ -60,11 +60,15 @@ static int input_root(void) { return host_active() && root_drawn && plat.frames-
 enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE, K_ACT, K_ACT_CLEAR, K_MAP };
 typedef struct Row { const char *label; int kind; int arg; } Row;
 enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_FOV, S_CAMDIST, S_COUNT };
+enum { S_LOOK = 40, S_FX0 /* 41..46 */, S_HUD0 = 50 /* 50..54 */ };
 static const Row boot_rows[] = {{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row continue_rows[] = {{"CONTINUE",K_PAGE,14},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row pause_rows[] = {{"RESUME",K_RESUME,0},{"MAP",K_MAP,0},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"STATS",K_PAGE,1},{"BRIEF",K_PAGE,3},{"HELP",K_PAGE,62},{"EXIT GAME",K_PAGE,42}};
-static const Row settings_rows[] = {{"GRAPHICS",K_SUB,2},{"CONTROLS",K_SUB,3},{"GAMEPLAY",K_PAGE,68},{"AUDIO",K_PAGE,5},{"DISPLAY",K_PAGE,6},{"LANGUAGE",K_PAGE,7},{"BACK",K_BACK,0}};
-static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"FIELD OF VIEW",K_VALUE,S_FOV},{"CAMERA DISTANCE",K_VALUE,S_CAMDIST},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
+static const Row settings_rows[] = {{"GRAPHICS",K_SUB,2},{"CONTROLS",K_SUB,3},{"GAMEPLAY",K_PAGE,68},{"AUDIO",K_PAGE,5},{"DISPLAY",K_PAGE,6},{"LANGUAGE",K_PAGE,7},{"SCREEN EFFECTS",K_SUB,6},{"HUD",K_SUB,7},{"BACK",K_BACK,0}};
+#define SETTINGS_COUNT ((int)(sizeof settings_rows / sizeof settings_rows[0]))
+static const Row effects_rows[] = {{"COLOUR LOOK",K_VALUE,S_LOOK},{"SHARPEN",K_VALUE,S_FX0},{"ANTI-ALIASING",K_VALUE,S_FX0+1},{"VIGNETTE",K_VALUE,S_FX0+2},{"BRIGHTNESS",K_VALUE,S_FX0+3},{"CONTRAST",K_VALUE,S_FX0+4},{"SATURATION",K_VALUE,S_FX0+5},{"BACK",K_BACK,0}};
+static const Row hud_rows[] = {{"HUD",K_VALUE,S_HUD0},{"CLOCK",K_VALUE,S_HUD0+1},{"MONEY",K_VALUE,S_HUD0+2},{"HEALTH",K_VALUE,S_HUD0+3},{"ARMOUR",K_VALUE,S_HUD0+4},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"BACK",K_BACK,0}};
+static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"FIELD OF VIEW",K_VALUE,S_FOV},{"CAMERA DISTANCE",K_VALUE,S_CAMDIST},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
 enum { C_LOOK = 20, C_SENS, C_MOUSE0 /* 22..24 */ };
 /* button ids match main.c: A B X Y START BACK L1 R1 UP DOWN LEFT RIGHT L3 R3 */
 static const char *button_names[14] = {"BUTTON A","BUTTON B","BUTTON X","BUTTON Y","START","SELECT","L1","R1","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","L3","R3"};
@@ -130,8 +134,19 @@ static int fps_index(void) {
     int f = plat.fps_cap; if (f <= 0 || f > 120) f = 120;
     int b = 0; for (int i = 1; i < 3; i++) if (abs(fps_opts[i]-f) < abs(fps_opts[b]-f)) b = i; return b;
 }
+/* effect rows: lowest value, step and highest value */
+static const float fx_step[6][3] = {{0, 0.25f, 1}, {0, 1, 1}, {0, 0.25f, 0.75f}, {0.85f, 0.05f, 1.2f}, {0.85f, 0.05f, 1.25f}, {0.7f, 0.1f, 1.4f}};
 static void adjust(int row, int dir) {
     char v[32], v2[32];
+    if (row == S_LOOK) { tweaks_set_look(tweaks_look() + (dir > 0 ? 1 : -1)); return; }
+    if (row >= S_FX0 && row < S_FX0 + 6) {
+        const float *r = fx_step[row - S_FX0];
+        float x = tweaks_fx_get(row - S_FX0) + r[1] * (dir > 0 ? 1 : -1);
+        x = r[1] * floorf(x / r[1] + 0.5f);
+        tweaks_fx_set(row - S_FX0, x < r[0] ? r[0] : x > r[2] ? r[2] : x);
+        return;
+    }
+    if (row >= S_HUD0 && row < S_HUD0 + 5) { tweaks_set_hud_shown(row - S_HUD0, !tweaks_hud_shown(row - S_HUD0)); return; }
     if (row == S_FPS) {
         int i = fps_index() + dir; if (i < 0) i = 0; if (i > 2) i = 2;
         plat.fps_cap = fps_opts[i]; snprintf(v, sizeof v, "%d", plat.fps_cap); tweaks_save("fps_cap", v);
@@ -172,6 +187,15 @@ static void adjust(int row, int dir) {
     }
 }
 static void value_text(int row, char *o, size_t n) {
+    if (row == S_LOOK) { static const char *l[4] = {"ORIGINAL", "NATURAL", "CLEAR", "MOODY"}; snprintf(o, n, "%s", l[tweaks_look() & 3]); return; }
+    if (row >= S_FX0 && row < S_FX0 + 6) {
+        int i = row - S_FX0; float x = tweaks_fx_get(i);
+        if (i == 1) snprintf(o, n, "%s", x > 0.5f ? "FXAA" : "OFF");
+        else if ((i == 0 || i == 2) && x <= 0) snprintf(o, n, "OFF");
+        else snprintf(o, n, "%d%%", (int)(x * 100.0f + 0.5f));
+        return;
+    }
+    if (row >= S_HUD0 && row < S_HUD0 + 5) { snprintf(o, n, "%s", tweaks_hud_shown(row - S_HUD0) ? "ON" : "OFF"); return; }
     switch (row) {
     case S_FPS: snprintf(o, n, "%d", fps_opts[fps_index()]); break;
     case S_VSYNC: snprintf(o, n, "%s", plat.vsync ? "ON" : "OFF"); break;
@@ -395,9 +419,10 @@ static int cur_rows(const Row **out);
  * own rows on the right. Returns 0 at the root, where the left list is the current one. */
 static int parent_rows(const Row **out, int *sel) {
     int s = MS32(MENU + SCREEN);
-    if (s == 41 && (sub == 2 || sub == 3)) { *out = settings_rows; *sel = sub - 2; return 7; }
+    if (s == 41 && (sub == 2 || sub == 3)) { *out = settings_rows; *sel = sub - 2; return SETTINGS_COUNT; }
+    if (s == 41 && (sub == 6 || sub == 7)) { *out = settings_rows; *sel = sub; return SETTINGS_COUNT; }
     if (s == 41 && (sub == 4 || sub == 5)) { *out = controls_rows; *sel = sub - 4; return CONTROLS_COUNT; }
-    if (engine_page(s)) { *out = settings_rows; *sel = s == 68 ? 2 : s == 5 ? 3 : s == 6 ? 4 : 5; return 7; }
+    if (engine_page(s)) { *out = settings_rows; *sel = s == 68 ? 2 : s == 5 ? 3 : s == 6 ? 4 : 5; return SETTINGS_COUNT; }
     if (s == 41) { *sel = root_index(K_PAGE, 41); return root_rows(root_ctx, out); }
     if (s == 2) { *sel = root_index(K_PAGE, 2); return root_rows(root_ctx, out); }
     return 0;
@@ -405,7 +430,9 @@ static int parent_rows(const Row **out, int *sel) {
 static int child_view(void) { const Row *r; int sel; return parent_rows(&r, &sel) > 0; }
 /* Rows a highlighted root/parent row would open, for the right pane preview (host lists only). */
 static int preview_rows(const Row *x, const Row **out) {
-    if (x->kind == K_PAGE && x->arg == 41) { *out = settings_rows; return 7; }
+    if (x->kind == K_PAGE && x->arg == 41) { *out = settings_rows; return SETTINGS_COUNT; }
+    if (x->kind == K_SUB && x->arg == 6) { *out = effects_rows; return (int)(sizeof effects_rows / sizeof effects_rows[0]); }
+    if (x->kind == K_SUB && x->arg == 7) { *out = hud_rows; return (int)(sizeof hud_rows / sizeof hud_rows[0]); }
     if (x->kind == K_SUB && x->arg == 2) { *out = graphics_rows; return (int)(sizeof graphics_rows / sizeof graphics_rows[0]); }
     if (x->kind == K_SUB && x->arg == 3) { *out = controls_rows; return CONTROLS_COUNT; }
     if (x->kind == K_SUB && x->arg == 4) { *out = foot_rows; return (int)(sizeof foot_rows / sizeof foot_rows[0]); }
@@ -427,7 +454,9 @@ static int cur_rows(const Row **out) {
     if (s == 41 && sub == 4) { *out = foot_rows; return (int)(sizeof foot_rows / sizeof foot_rows[0]); }
     if (s == 41 && sub == 5) { *out = car_rows; return (int)(sizeof car_rows / sizeof car_rows[0]); }
     if (s == 41 && sub == 2) { *out = graphics_rows; return (int)(sizeof graphics_rows / sizeof graphics_rows[0]); }
-    if (s == 41) { *out = settings_rows; return 7; }
+    if (s == 41 && sub == 6) { *out = effects_rows; return (int)(sizeof effects_rows / sizeof effects_rows[0]); }
+    if (s == 41 && sub == 7) { *out = hud_rows; return (int)(sizeof hud_rows / sizeof hud_rows[0]); }
+    if (s == 41) { *out = settings_rows; return SETTINGS_COUNT; }
     return root_rows(s, out);
 }
 static int rows(void) { const Row *r; return cur_rows(&r); }
@@ -467,8 +496,8 @@ static void native_back(CPU *c) {
 static void go_back(CPU *c) {
     if (capture_btn >= 0) capture_btn = -1;
     else if (capture_act >= 0) capture_act = -1;
-    else if (sub >= 4) set_sub(3, sub - 4); /* back to CONTROLS, on the row that opened the page */
-    else if (sub) set_sub(0, sub == 2 ? 0 : 1);
+    else if (sub == 4 || sub == 5) set_sub(3, sub - 4); /* back to CONTROLS, on the row that opened the page */
+    else if (sub) set_sub(0, sub == 2 ? 0 : sub == 3 ? 1 : sub); /* settings row that opened the page */
     else if (MS32(MENU + SCREEN) == 41) { navigate(c, root_ctx); selection = root_index(K_PAGE, 41); last_screen = -1; keep_key = view_key(); }
     else if (engine_page(MS32(MENU + SCREEN))) { /* back to SETTINGS, on the row that opened this page */
         int from = MS32(MENU + SCREEN);
