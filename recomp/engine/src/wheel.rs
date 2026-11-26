@@ -1,4 +1,5 @@
-//! Optional fix for tyres that keep reduced grip after the first skid (libGame.so 2.4.379).
+//! Fix for tyres that keep reduced grip after the first skid (libGame.so 2.4.379). On by default; lcs.ini
+//! `skid_fix=0` restores the original behaviour.
 //!
 //! CVehicle::ProcessWheel (cars) and CVehicle::ProcessBikeWheel mean to lower a tyre's grip by the handling
 //! record's traction loss while that tyre is skidding. The "was already skidding" mark is a static in .bss: it is

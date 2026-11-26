@@ -35,7 +35,7 @@ typedef struct Settings {
     int touch_controls;  /* draw the Android on-screen controls */
     int skid_fix;        /* clear the tyre "already skidding" mark before each wheel step */
 } Settings;
-static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f, .fx = {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f}};
+static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f, .fx = {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f}, .skid_fix = 1};
 static char ini_path[600];
 
 static const char *DEFAULT_INI =
@@ -83,7 +83,7 @@ static const char *DEFAULT_INI =
     "fx_contrast=1.0\n"
     "fx_saturation=1.0\n"
     "; 1 = tyres get their grip back after a skid (the original keeps it reduced after the first one); 0 = original\n"
-    "skid_fix=0\n"
+    "skid_fix=1\n"
     "; HUD style: legacy (the game's own) or modern (GTA IV style: health and armour ring around the radar)\n"
     "hud_style=legacy\n"
     "; HUD parts, 1 = shown: hud (everything, including messages), hud_clock, hud_money, hud_health, hud_armour\n"

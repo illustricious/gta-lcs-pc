@@ -397,7 +397,7 @@ Faithful ports, no behaviour change (the handling override factors tried the sam
   arrives in a skid state, and nothing clears it. From then on every call starts with grip x the handling record's
   traction loss (bikes seen in a session: 0.82 and 0.90; other vehicles 0.70 to 0.90), so wheels lock under braking and
   break loose in corners sooner. A scripted session had both marks set in every report.
-- `skid_fix=1` (lcs.ini or `--set skid_fix 1`, default 0 = original) clears the mark before each call
+- `skid_fix=1` (lcs.ini or `--set skid_fix 1`, default 1; 0 = original behaviour) clears the mark before each call
   (recomp/engine/src/wheel.rs). Off while verifying. Brake force and grip both scale with the time step, so by the
   code the lock threshold does not depend on the frame rate.
 - Checked: with the fix on, both marks read 0 through a scripted session on foot among traffic. Not checked: braking
