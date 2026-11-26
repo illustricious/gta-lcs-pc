@@ -93,5 +93,27 @@ void port_test(CPU *c) {
         M64((uint64_t)node + 0x28) = (uint64_t)assoc;
         call(c, 0x2e765c, (uint64_t)node, 0, 0, 0);
     }
+    /* the per-frame skeleton update: a chain of associations on a clump without bones */
+    {
+        static uint8_t chain[12 * 0x60], hiers[12 * 0x30], group[0x40], frame[0xc0], sub[8], clump[0x30], bones[0x20];
+        for (int i = 0; i < 4000; i++) {
+            int n = (int)rnd(13);
+            memset(group, 0, sizeof group); memset(frame, 0, sizeof frame); memset(sub, 0, sizeof sub);
+            memset(clump, 0, sizeof clump); memset(bones, 0, sizeof bones);
+            M64((uint64_t)group + 8) = (uint64_t)frame;
+            M64((uint64_t)group + 0x30) = (uint64_t)clump;
+            M64((uint64_t)frame + 0xb0) = (uint64_t)sub;
+            M64((uint64_t)clump) = n ? (uint64_t)chain : 0;
+            M64((uint64_t)clump + 0x20) = (uint64_t)bones;
+            for (int k = 0; k < n; k++) {
+                uint8_t *a = chain + k * 0x60, *h = hiers + k * 0x30;
+                fill_assoc(a, h);
+                M64((uint64_t)a) = k + 1 < n ? (uint64_t)(a + 0x60) : 0;
+                M64((uint64_t)h) = rnd(5) ? 1 : 0; /* without it the association takes no part */
+                if (!rnd(4)) M16((uint64_t)a + 0x10) |= 0x21;
+            }
+            call(c, 0x2e8e20, (uint64_t)group, 0, pick(-0.1f, 0.5f), 0);
+        }
+    }
     rt_log("porttest: 4000 rounds of the animation ports done\n");
 }

@@ -12,7 +12,7 @@
 //! Ports that call back into the game are only shadow-verified on the paths without such a call.
 
 use crate::cpu::Cpu;
-use crate::guest::call;
+use crate::guest::{call, fma};
 use crate::mem::*;
 use crate::verify::{self, Ret};
 
@@ -34,6 +34,7 @@ extern "C" {
     fn G_2e6f98_orig(c: *mut Cpu);
     fn G_2e762c_orig(c: *mut Cpu);
     fn G_2e765c_orig(c: *mut Cpu);
+    fn G_2e8e20_orig(c: *mut Cpu);
 }
 
 /// Call a guest function pointer (an absolute guest address).
@@ -323,4 +324,227 @@ pub unsafe extern "C" fn G_2e765c(c: *mut Cpu) {
         let v = next_key_frame_no_calc(this);
         c.set_w(0, v);
     });
+}
+
+// ---- per-frame update of a skeleton ----------------------------------------------------------------
+//
+// RslElementGroup +0x08 frame, +0x30 clump data. Clump data: +0x00 first association (associations start with the
+// next link), +0x10 i32 bone count, +0x18 pointer (non-null: bones flagged 8 are skipped), +0x20 bone data (0x20
+// bytes each, byte 0 flags). The pose itself is written by the ForAllNodes callbacks, which stay recompiled C.
+
+const GET_NODE: u64 = 0x7c9800; // CAnimBlendAssociation::GetNode(int)
+const FOR_ALL_NODES: u64 = 0x7c9870; // CAnimBlendElementGroupData::ForAllNodes(callback, data)
+const IS_SKINNED: u64 = 0x7c9660;
+const UPDATE_FRAMES: u64 = 0x7c9a60;
+const CURRENT_CLUMP: u64 = G + 0x847d20;
+const GOT_CALLBACK_FIRST: u64 = 0x7f8fe0;
+const GOT_CALLBACK_PLAIN: u64 = 0x7f8fe8;
+const GOT_CALLBACK_SKINNED: u64 = 0x7f8ff0;
+const MAX_BLENDED: usize = 11;
+
+/// AnimBlendUpdateData: a flag and the node arrays of the associations in play, null-terminated.
+#[repr(C)]
+struct UpdateData {
+    moving: u32,
+    _pad: u32,
+    nodes: [u64; MAX_BLENDED + 2],
+}
+
+/// Blend step of one association. Returns false when it deleted itself.
+unsafe fn blend_step(c: &mut Cpu, assoc: u64, step: f32) -> bool {
+    let delta = rf32(assoc + 0x38);
+    let blend = rf32(assoc + 0x18) + delta * step;
+    w32f(assoc + 0x18, blend);
+    if blend <= 0.0 && delta < 0.0 {
+        let flags = r8(assoc + 0x10);
+        w32(assoc + 0x18, 0);
+        w32(assoc + 0x38, 0);
+        if flags & 4 != 0 {
+            if r32(assoc + 0x48).wrapping_sub(1) <= 1 {
+                callback(c, r64(assoc + 0x50), assoc, r64(assoc + 0x58));
+            }
+            call(c, ASSOC_DESTRUCT, &[assoc]);
+            call(c, OPERATOR_DELETE, &[assoc]);
+            return false;
+        }
+    } else if blend > 1.0 {
+        w32(assoc + 0x18, 0x3f80_0000);
+        if delta > 0.0 {
+            w32(assoc + 0x38, 0);
+        }
+    }
+    true
+}
+
+/// Advance one association's time. `sync` is the shared rate of the associations that run in step (flag 0x20),
+/// None when their weighted length is zero.
+unsafe fn time_step(c: &mut Cpu, assoc: u64, step: f32, sync: Option<f32>) {
+    let mut flags = r16(assoc + 0x10);
+    if flags & 1 == 0 {
+        return;
+    }
+    let now = rf32(assoc + 0x3c);
+    let total = total_time(assoc);
+    if now >= total {
+        w16(assoc + 0x10, flags & !1);
+        return;
+    }
+    let rate = if flags & 0x20 == 0 {
+        rf32(assoc + 0x40)
+    } else {
+        match sync {
+            Some(s) => s * total,
+            None => total,
+        }
+    };
+    let advance = rate * step;
+    let next = now + advance;
+    w32f(assoc + 0x14, advance);
+    w32f(assoc + 0x3c, next);
+    let total = total_time(assoc);
+    if !(next >= total) {
+        return;
+    }
+    if flags & 2 != 0 {
+        w32f(assoc + 0x3c, next - total);
+        return;
+    }
+    w32f(assoc + 0x3c, total);
+    if flags & 8 != 0 {
+        flags |= 4;
+        w32(assoc + 0x38, 0xc080_0000);
+        w16(assoc + 0x10, flags);
+    }
+    if r32(assoc + 0x48) == 1 {
+        let (f, arg) = (r64(assoc + 0x50), r64(assoc + 0x58));
+        w32(assoc + 0x48, 0);
+        callback(c, f, assoc, arg);
+    }
+}
+
+unsafe fn update_animations(c: &mut Cpu, group: u64, step: f32, second_path: bool) {
+    let clump = r64(group + 0x30);
+    w64(CURRENT_CLUMP, clump);
+    let mut assoc = r64(clump);
+    if assoc == 0 {
+        return;
+    }
+    let mut data = UpdateData { moving: 0, _pad: 0, nodes: [0; MAX_BLENDED + 2] };
+    let mut count = 0usize;
+    let mut blend_sum = 0.0f32; // of the synchronised associations
+    let mut length_sum = 0.0f32; // total time / speed, weighted by blend
+    loop {
+        let next = r64(assoc);
+        if (step == 0.0 || blend_step(c, assoc, step)) && r64(r64(assoc + 0x30)) != 0 {
+            data.nodes[count] = call(c, GET_NODE, &[assoc, 0]).0;
+            count += 1;
+            if r16(assoc + 0x10) & 0x20 != 0 {
+                let length = total_time(assoc) / rf32(assoc + 0x40);
+                let blend = rf32(assoc + 0x18);
+                blend_sum += blend;
+                length_sum = fma(length, blend, length_sum);
+            } else {
+                data.moving = 1;
+            }
+        }
+        if next == 0 {
+            break;
+        }
+        assoc = next;
+        if count >= MAX_BLENDED {
+            break;
+        }
+    }
+    data.nodes[count] = 0;
+    let pointer = core::ptr::addr_of_mut!(data) as u64;
+
+    if !second_path {
+        call(c, FOR_ALL_NODES, &[clump, got(GOT_CALLBACK_FIRST), pointer]);
+        let bones = r64(clump + 0x20);
+        w8(bones, r8(bones) | 0x20);
+    } else {
+        let bones = r64(clump + 0x20);
+        let first = r64(pointer + 8);
+        if r8(bones) & 0x20 != 0 && first != 0 {
+            let n = ri32(clump + 0x10);
+            let mut slot = pointer + 8;
+            while r64(slot) != 0 {
+                if n >= 1 {
+                    let owner = r64(r64(slot) + 0x28);
+                    for k in 0..n as u64 {
+                        if r8(bones + k * 0x20) & 8 != 0 && r64(r64(CURRENT_CLUMP) + 0x18) != 0 {
+                            continue;
+                        }
+                        let node = r64(slot) + k * NODE_SIZE;
+                        if r64(node + 0x20) != 0 {
+                            let time = rf32(owner + 0x3c) - rf32(owner + 0x14);
+                            crate::guest::call_f(c, FIND_KEY_FRAME, &[node], &[time]);
+                        }
+                    }
+                }
+                slot += 8;
+            }
+        }
+        let skinned = call(c, IS_SKINNED, &[group]).0 & 1 != 0;
+        let f = got(if skinned { GOT_CALLBACK_SKINNED } else { GOT_CALLBACK_PLAIN });
+        call(c, FOR_ALL_NODES, &[clump, f, pointer]);
+        let bones = r64(clump + 0x20);
+        w8(bones, r8(bones) & !0x20);
+    }
+
+    if step > 0.0 {
+        let mut assoc = r64(clump);
+        if assoc != 0 {
+            let rate = blend_sum / length_sum;
+            while assoc != 0 {
+                let sync = if length_sum == 0.0 { None } else { Some(rate) };
+                time_step(c, assoc, step, sync);
+                assoc = r64(assoc);
+            }
+        }
+    }
+    call(c, UPDATE_FRAMES, &[r64(group + 8)]);
+}
+
+/// Shadow verification runs the original and the port on the same records, so it only fits updates that call nothing
+/// that changes memory twice over: no bones, the first path, no deletes or callbacks (rt/porttest.c builds such
+/// records). Returns the region holding the associations.
+unsafe fn verifiable(group: u64, second_path: bool) -> Option<(u64, usize)> {
+    if !verify::enabled() || second_path {
+        return None;
+    }
+    let clump = r64(group + 0x30);
+    if ri32(clump + 0x10) != 0 {
+        return None;
+    }
+    let (mut a, mut low, mut high, mut n) = (r64(clump), u64::MAX, 0u64, 0);
+    while a != 0 && n < 16 {
+        if r8(a + 0x10) & 4 != 0 || r32(a + 0x48) != 0 {
+            return None;
+        }
+        low = low.min(a);
+        high = high.max(a + 0x60);
+        a = r64(a);
+        n += 1;
+    }
+    if a != 0 || (n > 0 && high - low > 0x800) {
+        return None;
+    }
+    Some(if n == 0 { (0, 0) } else { (low, (high - low) as usize) })
+}
+
+/// void RslAnimBlendElementGroupUpdateAnimations(RslElementGroup *, float step, bool second_path)
+#[no_mangle]
+pub unsafe extern "C" fn G_2e8e20(c: *mut Cpu) {
+    let group = (*c).x[0];
+    let step = (*c).s(0);
+    let second = (*c).x[1] & 1 != 0;
+    if let Some(assocs) = verifiable(group, second) {
+        let bones = r64(r64(group + 0x30) + 0x20);
+        let frame = r64(group + 8);
+        let regions = [assocs, (CURRENT_CLUMP, 8), (bones, 1), (frame, 4), (r64(frame + 0xb0), 4)];
+        verify::port_regions(c, G_2e8e20_orig, Ret::None, &regions, |c| update_animations(c, group, step, second));
+    } else {
+        update_animations(&mut *c, group, step, second);
+    }
 }

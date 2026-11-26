@@ -359,6 +359,9 @@ Faithful ports, no behaviour change (the handling override factors tried the sam
   CAnimBlendAssociation::Start (5.1M port calls overall, 0 mismatches). The other animation ports were not reached in
   play; `LCS_PORT_TEST=1` (rt/porttest.c) feeds them 4000 rounds of random records at start-up: 0 mismatches. Paths
   that call back into the game (key frame lookup, delete, callbacks) are not covered by either.
-- Not ported: the per-frame pose update the game actually runs (RslAnimBlendElementGroupUpdateAnimations, 0x2e8e20,
-  CAnimBlendNode::Update) and vehicle physics. Most of the ported playback methods are inlined there, so they run less
-  often than their names suggest.
+- Per-frame skeleton update (26 Nov 2026): RslAnimBlendElementGroupUpdateAnimations (0x2e8e20) is also ported
+  (blending, node collection, key frame sync, time advance). Shadow verification cannot run it twice on live skeletons,
+  so only records without bones, deletes or callbacks are compared (4000 random rounds in porttest.c, 0 mismatches);
+  the live path is covered only by a scripted walk / run session without a crash and with normal-looking animation.
+- Not ported: the pose evaluation itself (the ForAllNodes callbacks, CAnimBlendNode::Update, key frame
+  interpolation) and vehicle physics.
