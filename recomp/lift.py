@@ -42,6 +42,7 @@ HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8,
                     0x563238,  # CalcScreenSize: world cull counters (rt/engine_bridge.c)
                     0x46f818,  # CDraw::SetFOV: FOV scale (recomp/engine/src/camera.rs)
                     0x39d28c, 0x39bfd0, 0x39ef48,  # cWorldStream swap / RemoveOldSectorModels / Render: sector cross-fade (rt/world_fade.c)
+                    0x4ec4d4,  # cHandlingDataMgr::ConvertDataToGameUnits (recomp/engine/src/handling.rs)
                     0x328188,  # CCamera::Process: car and ped generation distance x draw distance (recomp/engine/src/camera.rs)
                     0x543b7c,  # Touchscreen::Render: on-screen controls hidden (rt/tweaks.c)
                     # CCamera / CCam queries and setters (recomp/engine/src/camera.rs)

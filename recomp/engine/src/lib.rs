@@ -13,6 +13,7 @@
 mod camera;
 mod cpu;
 mod guest;
+mod handling;
 mod hud;
 mod lod;
 mod mem;
