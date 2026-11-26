@@ -416,6 +416,11 @@ void tweaks_apply(CPU *c) {
         lcs_set_radar(cfg.radar_bottom, cfg.radar_margin, cfg.radar_scale);
         void lcs_set_fov_scale(float scale);
         lcs_set_fov_scale(cfg.fov_scale > 0 ? cfg.fov_scale : 1.0f);
+        { void lcs_set_far_clip_scale(float s); const char *e = getenv("LCS_FAR");
+          /* tests: LCS_FAR overrides the factor */
+          lcs_set_far_clip_scale(e ? (float)atof(e) : cfg.draw_distance); }
+        if (rt_verbose) { static unsigned n; if (++n % 120 == 0) { void lcs_far_clip_seen(float *o); float v[2]; lcs_far_clip_seen(v);
+          rt_log("diag: time cycle far clip %.0f fog start %.0f (before scaling)", v[0], v[1]); rt_log("%c", 10); } }
         apply_camera_distance();
         void lcs_radar_layout(void); lcs_radar_layout();
     }

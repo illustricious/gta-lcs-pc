@@ -301,3 +301,18 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
 - Checked: five patched literals in the generated code, the build starts and plays a scripted run without a trap.
   Not compared visually. Left alone because their meaning is unclear: the 40 / 50 unit constants (static and permanent
   shadows, shadow sector lists) and CDynamicShadows.
+
+## Far clip and fog start follow draw_distance (26 Nov 2026)
+- The time cycle's far clip (CTimeCycle +0x2b8c, about 1010 units at 05:40) and fog start (+0x2b90, about 36) are
+  multiplied by `draw_distance` in `recomp/engine/src/timecycle.rs` (`scale_far_clip`, skipped while verifying).
+  `LCS_FAR=<factor>` overrides it; `--verbose` logs the unscaled values.
+- Measured effect is small: about 2% more world meshes drawn at (1300, -50) with factor 3 than with 1, and no visible
+  new buildings in the screenshots. The sector's own LOD lists only span about 600..1000 units around the cell centre,
+  so beyond the original far clip there is little left to draw. Showing more city needs the LOD lists of neighbouring
+  sectors loaded and drawn as well (a streaming change, not a setting).
+
+## Units and vehicle speed (from cHandlingDataMgr::ConvertDataToGameUnits, 26 Nov 2026)
+- Velocities are vectors in world units per 1/50 s tick. The handling max velocity is divided by 180 (= km/h / 3.6 / 50),
+  and acceleration is multiplied by 0.0004 (= 1/50^2), so 1 world unit is treated as 1 metre.
+- CCarCtrl uses 5.0 literals in its lane placement code, matching the 5 m lane width of this engine family (not traced
+  literal by literal); real lanes are about 3.0..3.7 m.

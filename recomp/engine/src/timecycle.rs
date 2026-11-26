@@ -233,6 +233,38 @@ pub unsafe extern "C" fn G_36d570(c: *mut Cpu) {
     verify::port_regions(c, G_36d570_orig, Ret::None, &regions, |c| force_update(c, this));
 }
 
+static FAR_SCALE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0x3f80_0000); // 1.0
+static FAR_SEEN: [core::sync::atomic::AtomicU32; 2] = [core::sync::atomic::AtomicU32::new(0), core::sync::atomic::AtomicU32::new(0)];
+
+/// Host setting (lcs.ini `draw_distance`): factor on the time cycle's far clip and fog start.
+#[no_mangle]
+pub extern "C" fn lcs_set_far_clip_scale(scale: f32) {
+    let s = if scale.is_finite() && scale >= 1.0 && scale <= 3.0 { scale } else { 1.0 };
+    FAR_SCALE.store(s.to_bits(), core::sync::atomic::Ordering::Relaxed);
+}
+
+/// Last far clip and fog start before scaling (diagnostics).
+#[no_mangle]
+pub extern "C" fn lcs_far_clip_seen(out: *mut f32) {
+    for i in 0..2 {
+        unsafe { *out.add(i) = f32::from_bits(FAR_SEEN[i].load(core::sync::atomic::Ordering::Relaxed)) };
+    }
+}
+
+/// New behaviour (off while verifying): the weather's far clip (+0x2b8c) and fog start (+0x2b90) are multiplied, so
+/// the world is drawn and fogged farther out.
+unsafe fn scale_far_clip(this: u64) {
+    if verify::enabled() {
+        return;
+    }
+    let k = f32::from_bits(FAR_SCALE.load(core::sync::atomic::Ordering::Relaxed));
+    for (i, off) in [0x2b8cu64, 0x2b90].iter().enumerate() {
+        let v = rf32(this + off);
+        FAR_SEEN[i].store(v.to_bits(), core::sync::atomic::Ordering::Relaxed);
+        w32f(this + off, v * k);
+    }
+}
+
 unsafe fn force_update(c: &mut Cpu, this: u64) {
     // position within the hour, and within the weather change
     let seconds = r8(got(GOT_SECONDS)) as f32;
@@ -271,6 +303,7 @@ unsafe fn force_update(c: &mut Cpu, this: u64) {
 
     sun_direction(c, this);
     extra_colour(this);
+    scale_far_clip(this);
 
     // motion blur colour of TheCamera (inverted), for the default blur types
     let cam = got(GOT_THE_CAMERA);
