@@ -67,9 +67,40 @@ void G_39bfd0(CPU *c) {
     G_39bfd0_orig(c);
 }
 
+/* LCS_SECTOR_DUMP: after each swap, how far the new sector's lists reach and how many models each list gains over the
+ * previous sector (what a neighbouring sector adds). */
+static void survey(uint64_t w) {
+    static unsigned char prev[6][4096];
+    uint64_t s = vec_first(w, 0x38);
+    if (!s) return;
+    float cx = -2000.0f + 100.0f * (float)MS32(w + 0x50), cy = -2000.0f + 86.6f * (float)MS32(w + 0x54);
+    rt_log("sector: cell %d,%d centre %.0f,%.0f\n", MS32(w + 0x50), MS32(w + 0x54), cx, cy);
+    for (int l = 0; l < 6; l++) {
+        uint64_t b = M64(s + 0x10 + 8 * l), e = M64(s + 0x18 + 8 * l);
+        static unsigned char now[4096];
+        memset(now, 0, sizeof now);
+        float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+        int n = 0, added = 0;
+        for (uint64_t p = b; p && p < e && n < 4000; p += 0x78, n++) {
+            unsigned id = M16(p) & 0x7fff;
+            float x = MF32(p + 0x68), y = MF32(p + 0x6c);
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+            now[id >> 3] |= (unsigned char)(1 << (id & 7));
+            if (!(prev[l][id >> 3] & (1 << (id & 7)))) added++;
+        }
+        memcpy(prev[l], now, sizeof now);
+        if (n) rt_log("sector: list %d count %d new %d  x %.0f..%.0f  y %.0f..%.0f\n", l, n, added, x0, x1, y0, y1);
+    }
+}
+
 void G_39d28c(CPU *c) {
     uint64_t w = c->x[0];
-    if (cfg_duration() <= 0) { G_39d28c_orig(c); return; }
+    static int dump = -1;
+    if (dump < 0) dump = getenv("LCS_SECTOR_DUMP") != 0;
+    if (cfg_duration() <= 0) { G_39d28c_orig(c); if (dump) survey(w); return; }
     if (fading) end_fade(c, "next swap");
     uint64_t before = vec_first(w, 0x38);
     in_swap = 1; deferred = 0;

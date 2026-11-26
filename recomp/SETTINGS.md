@@ -316,3 +316,15 @@ Hooks in use: `G_370b30` (timer), `G_527bf4` (frontend), `G_41e0cc` (ped velocit
   and acceleration is multiplied by 0.0004 (= 1/50^2), so 1 world unit is treated as 1 metre.
 - CCarCtrl uses 5.0 literals in its lane placement code, matching the 5 m lane width of this engine family (not traced
   literal by literal); real lanes are about 3.0..3.7 m.
+
+## Would neighbouring sectors' LOD lists show more city? No (measured 26 Nov 2026)
+- `LCS_SECTOR_DUMP=1 --verbose` logs, after each sector swap (world_fade off), the lists of the new sector: count, models
+  not in the previous sector, and the bounds of their positions (relative to the cell centre).
+- Adjacent cells (100 x 87 units apart) share almost all LOD chunks: list 1 gained 4, 12 and 6 models out of about
+  210 (list 0: 0 or 1 of 17). A diagonal two-cell jump gained 41 of 234.
+- At cell 31,20 list 1 spans world x 534..1659, y -1360..246 and list 0 x -486..719: the current sector already holds
+  LOD geometry for the whole area around the player and beyond the original far clip in most directions.
+- So a loader for neighbouring sectors was not built: it would add a few percent of chunks, some of them LODs of areas
+  the current sector draws in detail (overlap), at high crash and memory risk. What still limits the view is the
+  detail-to-LOD boundary (about 300 units, baked), not missing far geometry. If far buildings are visibly absent
+  somewhere, that needs the position and a screenshot to trace (culling), not more sectors.
