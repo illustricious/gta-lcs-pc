@@ -31,6 +31,7 @@ typedef struct Settings {
     float fx[6];         /* sharpen, fxaa, vignette, brightness, contrast, saturation */
     int look;            /* colour preset of the time cycle: 0 original, 1 natural, 2 clear, 3 moody */
     int hud_hidden;      /* bit 0 whole HUD, 1 clock, 2 money, 3 health, 4 armour */
+    int hud_modern;      /* rectangular radar with bars under it */
     int touch_controls;  /* draw the Android on-screen controls */
 } Settings;
 static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f, .fx = {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f}};
@@ -80,6 +81,8 @@ static const char *DEFAULT_INI =
     "fx_brightness=1.0\n"
     "fx_contrast=1.0\n"
     "fx_saturation=1.0\n"
+    "; HUD style: legacy (the game's own) or modern (rectangular radar with health and armour bars under it)\n"
+    "hud_style=legacy\n"
     "; HUD parts, 1 = shown: hud (everything, including messages), hud_clock, hud_money, hud_health, hud_armour\n"
     "hud=1\n"
     "hud_clock=1\n"
@@ -126,7 +129,10 @@ void tweaks_set_hud_shown(int part, int shown) {
     cfg.hud_hidden = shown ? cfg.hud_hidden & ~(1 << part) : cfg.hud_hidden | (1 << part);
     tweaks_save(hud_keys[part], shown ? "1" : "0");
 }
+int tweaks_hud_modern(void) { return cfg.hud_modern; }
+void tweaks_set_hud_modern(int modern) { cfg.hud_modern = modern != 0; tweaks_save("hud_style", modern ? "modern" : "legacy"); }
 static int visual_ini(const char *key, const char *val) {
+    if (!strcmp(key, "hud_style")) { cfg.hud_modern = !strcmp(val, "modern"); return 1; }
     for (int i = 0; i < 6; i++)
         if (!strcmp(key, fx_keys[i].key)) { cfg.fx[i] = fx_clamp(i, (float)atof(val)); return 1; }
     if (!strcmp(key, "look")) {
@@ -499,6 +505,7 @@ void tweaks_apply(CPU *c) {
             void lcs_set_look(float tint, float fog, float ambient); void lcs_set_hud(int hidden);
             lcs_set_look(looks[cfg.look][0], looks[cfg.look][1], looks[cfg.look][2]);
             lcs_set_hud(cfg.hud_hidden);
+            void lcs_set_hud_style(int modern); lcs_set_hud_style(cfg.hud_modern);
         }
         { void lcs_set_generation_scale(float s); const char *g = getenv("LCS_GEN"); /* tests: override */
           lcs_set_generation_scale(g ? (float)atof(g) : cfg.draw_distance); }

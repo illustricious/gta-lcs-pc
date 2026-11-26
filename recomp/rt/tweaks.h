@@ -12,6 +12,8 @@ int tweaks_look(void);
 void tweaks_set_look(int look);
 int tweaks_hud_shown(int part); /* 0 whole HUD, 1 clock, 2 money, 3 health, 4 armour */
 void tweaks_set_hud_shown(int part, int shown);
+int tweaks_hud_modern(void);
+void tweaks_set_hud_modern(int modern);
 float tweaks_draw_distance(void);
 void tweaks_set_draw_distance(float k);
 float tweaks_res_scale(void);

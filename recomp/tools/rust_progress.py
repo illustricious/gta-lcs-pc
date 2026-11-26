@@ -19,7 +19,7 @@ GAME = re.compile(r'^_ZN\d+([Cc][A-Z]\w*)')  # C*/c* engine classes = game code
 
 
 # Exported from Rust but only wrapping the recompiled original (CCamera::Process, the CHud draw parts): not rewritten.
-WRAPPERS = {0x328188, 0x47db64, 0x483db0, 0x482950, 0x482b48, 0x483364}
+WRAPPERS = {0x328188, 0x358c84, 0x35b4f4, 0x35c90c, 0x4a4408, 0x47db64, 0x483db0, 0x482950, 0x482b48, 0x483364}
 
 
 def main():

@@ -37,7 +37,8 @@ F(void, BufferData, (GLenum, GLsizeiptr, const void *, GLenum));
 F(void, GetVertexAttribiv, (GLuint, GLenum, GLint *)); F(void, GetVertexAttribPointerv, (GLuint, GLenum, void **));
 F(void, VertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *));
 F(void, EnableVertexAttribArray, (GLuint)); F(void, DisableVertexAttribArray, (GLuint));
-F(void, DrawArrays, (GLenum, GLint, GLsizei));
+F(void, DrawArrays, (GLenum, GLint, GLsizei)); F(void, Scissor, (GLint, GLint, GLsizei, GLsizei));
+F(void, GetFloatv, (GLenum, GLfloat *));
 F(void, Uniform2f, (GLint, GLfloat, GLfloat)); F(void, Uniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat));
 #undef F
 
@@ -54,7 +55,7 @@ static int load(void) {
     L(BindAttribLocation); L(LinkProgram); L(GetProgramiv); L(UseProgram); L(GetUniformLocation); L(Uniform1i);
     L(GenBuffers); L(BindBuffer); L(BufferData); L(GetVertexAttribiv); L(GetVertexAttribPointerv);
     L(VertexAttribPointer); L(EnableVertexAttribArray); L(DisableVertexAttribArray); L(DrawArrays);
-    L(Uniform2f); L(Uniform4f);
+    L(Uniform2f); L(Uniform4f); L(Scissor); L(GetFloatv);
 #undef L
     return 1;
 }
@@ -156,6 +157,40 @@ void present_map_point(float *px, float *py) {
     if (*px > scene_w - 1) *px = (float)(scene_w - 1); if (*py > scene_h - 1) *py = (float)(scene_h - 1);
 }
 
+/* A filled rectangle in window pixels, y from the top (scissored clear: no shader or vertex state involved). */
+static void fill(int wh, float x0, float y0, float x1, float y1, float r, float g, float b) {
+    int ix = (int)(x0 + 0.5f), iy = (int)(y0 + 0.5f), w = (int)(x1 + 0.5f) - ix, h = (int)(y1 + 0.5f) - iy;
+    if (w <= 0 || h <= 0) return;
+    pScissor(ix, wh - iy - h, w, h);
+    pClearColor(r, g, b, 1);
+    pClear(GL_COLOR_BUFFER_BIT);
+}
+
+/* Modern HUD style (recomp/engine/src/hud.rs): health and armour as two flat bars under the rectangular radar. */
+static void modern_bars(int wh, float x, float y, float dw, float dh) {
+    int lcs_modern_overlay(float *out);
+    float v[6];
+    if (!lcs_modern_overlay(v)) return;
+    float left = x + v[0] * dw, right = x + v[1] * dw, top = y + v[2] * dh;
+    float height = dh * 0.011f, gap = dh * 0.006f, middle = left + (right - left) * 0.5f;
+    int hidden = (int)v[5];
+    GLfloat clear[4];
+    pGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
+    pEnable(GL_SCISSOR_TEST);
+    fill(wh, left, top + gap * 0.5f, right, top + gap * 1.5f + height, 0.05f, 0.05f, 0.05f);
+    float y0 = top + gap, y1 = y0 + height;
+    if (!(hidden & 8)) {
+        fill(wh, left + 2, y0, middle - 2, y1, 0.16f, 0.27f, 0.16f);
+        fill(wh, left + 2, y0, left + 2 + (middle - left - 4) * v[3], y1, 0.36f, 0.66f, 0.36f);
+    }
+    if (!(hidden & 16)) {
+        fill(wh, middle + 2, y0, right - 2, y1, 0.14f, 0.22f, 0.30f);
+        fill(wh, middle + 2, y0, middle + 2 + (right - middle - 4) * v[4], y1, 0.36f, 0.62f, 0.80f);
+    }
+    pDisable(GL_SCISSOR_TEST);
+    pClearColor(clear[0], clear[1], clear[2], clear[3]);
+}
+
 /* Draw the finished scene into the window (before the swap). */
 void present_frame(void) {
     if (!ready || !plat.window) return;
@@ -195,6 +230,7 @@ void present_frame(void) {
     pBindBuffer(GL_ARRAY_BUFFER, vbo); pBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STREAM_DRAW);
     pVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0); pEnableVertexAttribArray(0);
     pDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    modern_bars(wh, x, y, dw, dh);
 
     pBindBuffer(GL_ARRAY_BUFFER, buf);
     pVertexAttribPointer(0, size, type, (GLboolean)norm, stride, ptr);

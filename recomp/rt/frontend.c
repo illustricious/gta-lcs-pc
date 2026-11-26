@@ -60,14 +60,14 @@ static int input_root(void) { return host_active() && root_drawn && plat.frames-
 enum { K_PAGE, K_SUB, K_RESUME, K_NATIVE, K_BACK, K_VALUE, K_BIND, K_RESET, K_ENGINE, K_ACT, K_ACT_CLEAR, K_MAP };
 typedef struct Row { const char *label; int kind; int arg; } Row;
 enum { S_FPS, S_VSYNC, S_DRAW, S_RES, S_RADAR, S_MODE, S_FOCUS, S_RADAR_SIZE, S_FOV, S_CAMDIST, S_COUNT };
-enum { S_LOOK = 40, S_FX0 /* 41..46 */, S_HUD0 = 50 /* 50..54 */ };
+enum { S_LOOK = 40, S_FX0 /* 41..46 */, S_HUD0 = 50 /* 50..54 */, S_HUDSTYLE = 60 };
 static const Row boot_rows[] = {{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row continue_rows[] = {{"CONTINUE",K_PAGE,14},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"EXIT GAME",K_PAGE,42}};
 static const Row pause_rows[] = {{"RESUME",K_RESUME,0},{"MAP",K_MAP,0},{"GAME",K_PAGE,2},{"SETTINGS",K_PAGE,41},{"STATS",K_PAGE,1},{"BRIEF",K_PAGE,3},{"HELP",K_PAGE,62},{"EXIT GAME",K_PAGE,42}};
 static const Row settings_rows[] = {{"GRAPHICS",K_SUB,2},{"CONTROLS",K_SUB,3},{"GAMEPLAY",K_PAGE,68},{"AUDIO",K_PAGE,5},{"DISPLAY",K_PAGE,6},{"LANGUAGE",K_PAGE,7},{"SCREEN EFFECTS",K_SUB,6},{"HUD",K_SUB,7},{"BACK",K_BACK,0}};
 #define SETTINGS_COUNT ((int)(sizeof settings_rows / sizeof settings_rows[0]))
 static const Row effects_rows[] = {{"COLOUR LOOK",K_VALUE,S_LOOK},{"SHARPEN",K_VALUE,S_FX0},{"ANTI-ALIASING",K_VALUE,S_FX0+1},{"VIGNETTE",K_VALUE,S_FX0+2},{"BRIGHTNESS",K_VALUE,S_FX0+3},{"CONTRAST",K_VALUE,S_FX0+4},{"SATURATION",K_VALUE,S_FX0+5},{"BACK",K_BACK,0}};
-static const Row hud_rows[] = {{"HUD",K_VALUE,S_HUD0},{"CLOCK",K_VALUE,S_HUD0+1},{"MONEY",K_VALUE,S_HUD0+2},{"HEALTH",K_VALUE,S_HUD0+3},{"ARMOUR",K_VALUE,S_HUD0+4},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"BACK",K_BACK,0}};
+static const Row hud_rows[] = {{"STYLE",K_VALUE,S_HUDSTYLE},{"HUD",K_VALUE,S_HUD0},{"CLOCK",K_VALUE,S_HUD0+1},{"MONEY",K_VALUE,S_HUD0+2},{"HEALTH",K_VALUE,S_HUD0+3},{"ARMOUR",K_VALUE,S_HUD0+4},{"RADAR",K_VALUE,S_RADAR},{"RADAR SIZE",K_VALUE,S_RADAR_SIZE},{"BACK",K_BACK,0}};
 static const Row graphics_rows[] = {{"DISPLAY MODE",K_VALUE,S_MODE},{"FRAME RATE",K_VALUE,S_FPS},{"VSYNC",K_VALUE,S_VSYNC},{"DRAW DISTANCE",K_VALUE,S_DRAW},{"RESOLUTION",K_VALUE,S_RES},{"FIELD OF VIEW",K_VALUE,S_FOV},{"CAMERA DISTANCE",K_VALUE,S_CAMDIST},{"BACKGROUND PAUSE",K_VALUE,S_FOCUS},{"BACK",K_BACK,0}};
 enum { C_LOOK = 20, C_SENS, C_MOUSE0 /* 22..24 */ };
 /* button ids match main.c: A B X Y START BACK L1 R1 UP DOWN LEFT RIGHT L3 R3 */
@@ -138,6 +138,7 @@ static int fps_index(void) {
 static const float fx_step[6][3] = {{0, 0.25f, 1}, {0, 1, 1}, {0, 0.25f, 0.75f}, {0.85f, 0.05f, 1.2f}, {0.85f, 0.05f, 1.25f}, {0.7f, 0.1f, 1.4f}};
 static void adjust(int row, int dir) {
     char v[32], v2[32];
+    if (row == S_HUDSTYLE) { tweaks_set_hud_modern(!tweaks_hud_modern()); return; }
     if (row == S_LOOK) { tweaks_set_look(tweaks_look() + (dir > 0 ? 1 : -1)); return; }
     if (row >= S_FX0 && row < S_FX0 + 6) {
         const float *r = fx_step[row - S_FX0];
@@ -187,6 +188,7 @@ static void adjust(int row, int dir) {
     }
 }
 static void value_text(int row, char *o, size_t n) {
+    if (row == S_HUDSTYLE) { snprintf(o, n, "%s", tweaks_hud_modern() ? "MODERN" : "LEGACY"); return; }
     if (row == S_LOOK) { static const char *l[4] = {"ORIGINAL", "NATURAL", "CLEAR", "MOODY"}; snprintf(o, n, "%s", l[tweaks_look() & 3]); return; }
     if (row >= S_FX0 && row < S_FX0 + 6) {
         int i = row - S_FX0; float x = tweaks_fx_get(i);

@@ -378,3 +378,14 @@ Faithful ports, no behaviour change (the handling override factors tried the sam
   itself is not ported. Radar position and size moved from the GRAPHICS page to the HUD page.
 - Checked with screenshots: both menu pages, looks and effects in a scripted run, HUD parts hidden. Not tuned on other
   weather types or times of day.
+
+## Modern HUD style (26 Nov 2026)
+- SETTINGS > HUD > STYLE (lcs.ini `hud_style=legacy|modern`, default legacy). Modern is laid out like GTA V: a
+  rectangular, slightly tilted radar bottom-left with health (green) and armour (blue) as two bars under it.
+- Rust (recomp/engine/src/hud.rs): the radar widget is widened by 1.45, radar space is stretched vertically by the same
+  factor (map scale unchanged, the engine's unit-square clip gives the rectangle), blips clamp to the rectangle, the
+  circle mask and ring sprite are skipped, the screen transform narrows the far edge by 12%. The pause map is not changed.
+  The bars are drawn by rt/present.c from the player ped's health (+0x5a0) and armour (+0x5a4) against the maxima.
+  The original health and armour bars are hidden in this style; clock, money and weapon icon stay as in legacy.
+- Checked with screenshots at 1280x720 while walking and riding. Not checked: pause map after switching, other aspect
+  ratios, very high radar sizes, and the new menu row was not captured in a screenshot.

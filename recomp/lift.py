@@ -46,6 +46,7 @@ HOST_HOOKS = {'G': {0x370b30, 0x527bf4, 0x41e0cc, 0x48ca2c, 0x4106e8,
                     0x4f65fc, 0x4f6aa4, 0x4f66fc,  # cTransmission (recomp/engine/src/transmission.rs)
                     # CAnimBlendAssociation / CAnimBlendNode playback (recomp/engine/src/animation.rs)
                     0x2e8e20, 0x2e91d4, 0x2e973c, 0x2e6d64, 0x2e6e0c, 0x2e6ed8, 0x2e6f84, 0x2e6f98, 0x2e762c, 0x2e765c,
+                    0x358c84, 0x35b4f4, 0x35c90c, 0x4a4408,  # modern radar (recomp/engine/src/hud.rs)
                     0x47db64, 0x483db0, 0x482950, 0x482b48, 0x483364,  # CHud draw parts: HUD settings (recomp/engine/src/hud.rs)
                     0x328188,  # CCamera::Process: car and ped generation distance x draw distance (recomp/engine/src/camera.rs)
                     0x543b7c,  # Touchscreen::Render: on-screen controls hidden (rt/tweaks.c)
