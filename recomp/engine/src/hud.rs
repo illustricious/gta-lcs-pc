@@ -10,7 +10,7 @@
 //! corner and resizes it.
 
 use crate::cpu::Cpu;
-use crate::guest::{fcvtzu, fma, fmax, screen_size, sqrt};
+use crate::guest::{call, call_f, fcvtzu, fma, screen_size, sqrt};
 use crate::mem::{r32, r64, r8, rf32, rf64, w32f, G};
 use crate::verify::{self, Ret};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -82,16 +82,14 @@ pub unsafe extern "C" fn lcs_radar_layout() {
     }
     let scale = f32::from_bits(settings[2]);
     let new_style = settings[3] != 0;
-    let wide = if new_style { ASPECT } else { 1.0 };
-    let (width, height) = (ORIGINAL[1] * scale * wide, ORIGINAL[2] * scale);
-    let room = if new_style { BAR_ROOM } else { 0.0 };
+    let (width, height) = (ORIGINAL[1] * scale, ORIGINAL[2] * scale);
     // HUD space is 448 lines tall: position = y * scaleY, size = h * scaleSize
     let y = if settings[0] != 0 || new_style {
-        (448.0 - ORIGINAL[0] * sy - height * ss - f32::from_bits(settings[1]) - room) / sy
+        (448.0 - ORIGINAL[0] * sy - height * ss - f32::from_bits(settings[1])) / sy
     } else {
         ORIGINAL[0]
     };
-    // the modern rectangle keeps a gap to the left edge
+    // the modern style keeps room for its ring at the left edge
     static mut X: [f32; 2] = [f32::NAN, 0.0]; // as last written, original
     let x_now = rf32(w + 8);
     if x_now.to_bits() != X[0].to_bits() {
@@ -174,10 +172,7 @@ pub unsafe extern "C" fn G_358b34(c: *mut Cpu) {
         let dx = (px - rf32(G + 0x8577a8)) * inv;
         let (cs, sn) = (rf32(G + 0x857900), rf32(G + 0x857904));
         let out_x = fma(sn, dx, cs * dy);
-        let mut out_y = fma(-cs, dx, sn * dy);
-        if modern_radar() {
-            out_y *= ASPECT;
-        }
+        let out_y = fma(-cs, dx, sn * dy);
         w32f(c.x[0], out_x);
         w32f(c.x[0] + 4, out_y);
     })
@@ -196,9 +191,8 @@ pub unsafe extern "C" fn G_358b98(c: *mut Cpu) {
         let p = c.x[0];
         let (x, y) = (rf32(p), rf32(p + 4));
         let len = sqrt(fma(x, x, y * y));
-        let reach = if modern_radar() { fmax(x.abs(), y.abs()) } else { len };
-        if frontend_map_flag() == 0 && reach > 1.0 {
-            let k = 1.0 / reach;
+        if frontend_map_flag() == 0 && len > 1.0 {
+            let k = 1.0 / len;
             w32f(p, x * k);
             w32f(p + 4, y * k);
         }
@@ -253,7 +247,7 @@ macro_rules! hud_part {
     ($name:ident, $orig:ident, $bit:expr) => {
         #[no_mangle]
         pub unsafe extern "C" fn $name(c: *mut Cpu) {
-            // health (3) and armour (4) are drawn as bars by the host in the modern style
+            // health (3) and armour (4) are the ring around the radar in the modern style
             let replaced = $bit >= 3 && modern();
             if verify::enabled() || (HIDDEN.load(Ordering::Relaxed) & (1 << $bit) == 0 && !replaced) {
                 $orig(c);
@@ -262,9 +256,8 @@ macro_rules! hud_part {
     };
 }
 extern "C" {
-    fn G_358c84_orig(c: *mut Cpu);
-    fn G_35b4f4_orig(c: *mut Cpu);
-    fn G_35c90c_orig(c: *mut Cpu);
+    fn G_483a98_orig(c: *mut Cpu);
+    fn G_4a3c40_orig(c: *mut Cpu);
     fn G_4a4408_orig(c: *mut Cpu);
     fn G_47db64_orig(c: *mut Cpu);
     fn G_483db0_orig(c: *mut Cpu);
@@ -280,23 +273,28 @@ hud_part!(G_483364, G_483364_orig, 4); // CHud::DrawArmourBar
 
 // ---- modern HUD style ------------------------------------------------------------------------------
 //
-// SETTINGS > HUD > STYLE = MODERN (lcs.ini hud_style=modern): a rectangular, slightly tilted radar in the bottom-left
-// corner in the manner of GTA V, with health and armour as flat bars under it (drawn by rt/present.c). The radar
-// widget is widened; radar space is stretched vertically by the same factor so the map keeps its scale and the
-// engine's clip to the unit square becomes the rectangle; the circle mask and the ring sprite are not drawn. The
-// pause map is not changed.
+// SETTINGS > HUD > STYLE = MODERN (lcs.ini hud_style=modern), in the manner of GTA IV: the round radar in the
+// bottom-left corner inside a ring that shows health (left half, green) and armour (right half, blue), both filling
+// from the bottom; the weapon picture without its frame; the clock directly above the money. The ring is drawn with
+// the engine's own 2D polygons where the radar ring sprite was, so the map blips stay on top of it.
 
-const ASPECT: f32 = 1.45; // width / height of the modern radar
-const TILT: f32 = 0.12; // how much narrower the far edge is
-const BAR_ROOM: f32 = 14.0; // HUD lines kept free under the radar for the bars
 const LEFT_GAP: f32 = 12.0; // layout units added to the radar x
 const RING_CALL: u64 = G + 0x481330; // return address of the radar ring sprite in CHud::Draw
+const WEAPON_CALLS: [u64; 2] = [G + 0x47edcc, G + 0x47ee10]; // of the two weapon picture draws
+const CLOCK_CALL: u64 = G + 0x483ff8; // of DrawTimeAndCashNumbers in CHud::DrawTime
 const GOT_PLAYER_INDEX: u64 = G + 0x7f9118;
 const GOT_PLAYERS: u64 = G + 0x7f9120;
+const GET_RADAR_SIZE_X: u64 = 0x4841c8;
+const GET_RADAR_SIZE_Y: u64 = 0x484224;
+const SPRITE_DRAW_UV: u64 = 0x4a3fa4; // CSprite2d::Draw(rect, colour, 4 texture corners)
+const DRAW_2D_POLYGON: u64 = 0x4a4c18; // CSprite2d::Draw2DPolygon(4 points, colour)
+// part of the weapon picture inside its baked frame (left, right, top, bottom as texture coordinates)
+const ICON: [f32; 4] = [0.05, 0.935, 0.095, 0.665];
+// how far the clock moves down, in weapon picture heights
+const CLOCK_DROP: f32 = 0.66;
 
 static MODERN: AtomicBool = AtomicBool::new(false);
-static DRAWN: AtomicBool = AtomicBool::new(false);
-static CORNERS: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+static ICON_HEIGHT: AtomicU32 = AtomicU32::new(0);
 
 /// Host setting (lcs.ini `hud_style`).
 #[no_mangle]
@@ -309,101 +307,107 @@ fn modern() -> bool {
     MODERN.load(Ordering::Relaxed) && !verify::enabled()
 }
 
-/// Modern style applies to the in-game radar only, not to the pause map.
-#[inline]
-unsafe fn modern_radar() -> bool {
-    if !modern() {
-        return false;
-    }
-    let map = r64(G + 0x7f92c0);
-    r8(map + 0x11) == 0 && r8(map + 0x14) == 0
-}
-
-/// What the host draws over the radar this frame: out = left x, right x, bottom y (fractions of the screen, y from the
-/// top), health 0..1, armour 0..1, parts hidden (HUD bit set). Returns 0 when the modern radar was not drawn.
-#[no_mangle]
-pub unsafe extern "C" fn lcs_modern_overlay(out: *mut f32) -> i32 {
-    if !DRAWN.swap(false, Ordering::Relaxed) || !modern() {
-        return 0;
-    }
-    for i in 0..3 {
-        *out.add(i) = f32::from_bits(CORNERS[i].load(Ordering::Relaxed));
-    }
+/// Health and armour of the player in focus as 0..1.
+unsafe fn player_shares() -> Option<(f32, f32)> {
     let index = r8(r64(GOT_PLAYER_INDEX)) as u64;
     let info = r64(GOT_PLAYERS) + index * 0x1a0;
     let ped = r64(info);
     if ped == 0 {
-        return 0;
+        return None;
     }
     let share = |value: f32, max: u8| if max == 0 { 0.0 } else { (value / max as f32).clamp(0.0, 1.0) };
-    *out.add(3) = share(rf32(ped + 0x5a0), r8(info + 0x18f));
-    *out.add(4) = share(rf32(ped + 0x5a4), r8(info + 0x190));
-    *out.add(5) = HIDDEN.load(Ordering::Relaxed) as f32;
-    1
+    Some((share(rf32(ped + 0x5a0), r8(info + 0x18f)), share(rf32(ped + 0x5a4), r8(info + 0x190))))
 }
 
-/// void CRadar::DrawRadarMask(): the circle's corners. The modern radar keeps them and notes where it is instead.
-#[no_mangle]
-pub unsafe extern "C" fn G_35c90c(c: *mut Cpu) {
-    if !modern_radar() {
-        G_35c90c_orig(c);
+/// sin and cos of `turn` half turns (0..=1), close enough for drawing (no_std has no libm here).
+fn half_turn(turn: f32) -> (f32, f32) {
+    // Bhaskara's approximation of sin(pi x) on 0..=1, error below 0.002
+    let sine = |x: f32| {
+        let p = x * (1.0 - x);
+        16.0 * p / (5.0 - 4.0 * p)
+    };
+    let cos = if turn <= 0.5 { sine(0.5 - turn) } else { -sine(turn - 0.5) };
+    (sine(turn), cos)
+}
+
+/// A piece of ring: from the bottom of the radar upward, on the left (side -1) or right (side 1), up to `share` of
+/// the half circle. `inner` and `outer` are radii in radar radii.
+unsafe fn arc(c: *mut Cpu, at: [f32; 4], side: f32, share: f32, inner: f32, outer: f32, colour: [u8; 4]) {
+    const STEPS: u32 = 36;
+    const GAP: f32 = 0.012; // half turns left open at the bottom and the top
+    let [cx, cy, rx, ry] = at;
+    let span = (1.0 - 2.0 * GAP) * share;
+    if !(span > 0.0) {
         return;
     }
-    let mut at = [[0.0f32; 2]; 2];
-    for (i, x) in [-1.0f32, 1.0].iter().enumerate() {
-        let point = [*x, -1.0f32];
-        let mut screen = [0.0f32; 2];
-        crate::guest::call(c, 0x358c84, &[screen.as_mut_ptr() as u64, point.as_ptr() as u64, 0]);
-        at[i] = screen;
+    let point = |turn: f32, r: f32| {
+        let (s, co) = half_turn(turn);
+        [cx + side * s * rx * r, cy + co * ry * r]
+    };
+    for i in 0..STEPS {
+        let a = GAP + span * i as f32 / STEPS as f32;
+        let b = GAP + span * (i + 1) as f32 / STEPS as f32;
+        let (p3, p4, p2, p1) = (point(a, inner), point(a, outer), point(b, outer), point(b, inner));
+        call_f(c, DRAW_2D_POLYGON, &[colour.as_ptr() as u64], &[p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1]]);
     }
-    let values = [at[0][0] / 640.0, at[1][0] / 640.0, at[0][1] / 448.0]; // HUD space is 640 x 448
-    for (slot, v) in CORNERS.iter().zip(values) {
-        slot.store(v.to_bits(), Ordering::Relaxed);
-    }
-    DRAWN.store(true, Ordering::Relaxed);
 }
 
-/// void CRadar::TransformRadarPointToScreenSpace(CVector2D &out, CVector2D const &in, bool): tilted when modern.
-#[no_mangle]
-pub unsafe extern "C" fn G_358c84(c: *mut Cpu) {
-    if !modern_radar() {
-        G_358c84_orig(c);
-        return;
+/// The ring around the radar; `rect` is where the original ring sprite would go (same centre as the radar).
+unsafe fn draw_ring(c: *mut Cpu, rect: u64) {
+    let (left, bottom, right, top) = (rf32(rect), rf32(rect + 4), rf32(rect + 8), rf32(rect + 0xc));
+    let rx = call(c, GET_RADAR_SIZE_X, &[]).1 * 0.5;
+    let ry = call(c, GET_RADAR_SIZE_Y, &[]).1 * 0.5;
+    let at = [(left + right) * 0.5, (top + bottom) * 0.5, rx, ry];
+    let hidden = HIDDEN.load(Ordering::Relaxed);
+    let (health, armour) = player_shares().unwrap_or((0.0, 0.0));
+    for (side, bit, share, full, empty) in [
+        (-1.0f32, 8, health, [104u8, 170, 80, 255], [38u8, 62, 32, 200]),
+        (1.0, 16, armour, [84, 156, 216, 255], [30, 52, 74, 200]),
+    ] {
+        arc(c, at, side, 1.0, 0.98, 1.17, [12, 12, 14, 210]); // backing
+        if hidden & bit == 0 {
+            arc(c, at, side, 1.0, 1.02, 1.13, empty);
+            arc(c, at, side, share, 1.02, 1.13, full);
+        }
     }
-    let (out, input, flag) = ((*c).x[0], (*c).x[1], (*c).x[2]);
-    let y = rf32(input + 4);
-    let middle = [0.0f32, y];
-    let mut centre = [0.0f32; 2];
-    let saved: Cpu = *c;
-    (*c).x[0] = centre.as_mut_ptr() as u64;
-    (*c).x[1] = middle.as_ptr() as u64;
-    G_358c84_orig(c);
-    *c = saved;
-    (*c).x[2] = flag;
-    G_358c84_orig(c);
-    let k = 1.0 - TILT * y.clamp(-1.0, 1.0);
-    w32f(out, centre[0] + (rf32(out) - centre[0]) * k);
 }
 
-/// void CRadar::TransformRadarPointToRealWorldSpace(CVector2D &out, CVector2D const &in): the inverse of the vertical
-/// stretch of the modern radar.
-#[no_mangle]
-pub unsafe extern "C" fn G_35b4f4(c: *mut Cpu) {
-    if !modern_radar() {
-        G_35b4f4_orig(c);
-        return;
-    }
-    let input = (*c).x[1];
-    let point = [rf32(input), rf32(input + 4) / ASPECT];
-    (*c).x[1] = point.as_ptr() as u64;
-    G_35b4f4_orig(c);
-}
-
-/// The sprite draw with four colours (0x4a4408): the radar ring from CHud::Draw is left out when modern.
+/// The sprite draw with four colours (0x4a4408): when modern, the health and armour ring takes the place of the radar
+/// ring sprite of CHud::Draw.
 #[no_mangle]
 pub unsafe extern "C" fn G_4a4408(c: *mut Cpu) {
     if modern() && (*c).x[30] == RING_CALL {
+        draw_ring(c, (*c).x[1]);
         return;
     }
     G_4a4408_orig(c);
+}
+
+/// void CSprite2d::Draw(CRect const &, CRGBA const &): when modern, the weapon picture is cut to the inside of the
+/// frame that is part of its texture.
+#[no_mangle]
+pub unsafe extern "C" fn G_4a3c40(c: *mut Cpu) {
+    if !(modern() && WEAPON_CALLS.contains(&(*c).x[30])) {
+        G_4a3c40_orig(c);
+        return;
+    }
+    let (sprite, rect, colour) = ((*c).x[0], (*c).x[1], (*c).x[2]);
+    let (left, bottom, right, top) = (rf32(rect), rf32(rect + 4), rf32(rect + 8), rf32(rect + 0xc));
+    let [u0, u1, v0, v1] = ICON;
+    let (w, h) = (right - left, bottom - top);
+    ICON_HEIGHT.store(h.to_bits(), Ordering::Relaxed);
+    // CRect in memory: left, bottom, right, top
+    let cut = [left + u0 * w, top + v1 * h, left + u1 * w, top + v0 * h];
+    call_f(c, SPRITE_DRAW_UV, &[sprite, cut.as_ptr() as u64, colour], &[u0, v0, u1, v0, u0, v1, u1, v1]);
+}
+
+/// void CHud::DrawTimeAndCashNumbers(char *, float x, float y, short, bool): the clock sits lower when modern, in the
+/// row the health bar used, directly above the money.
+#[no_mangle]
+pub unsafe extern "C" fn G_483a98(c: *mut Cpu) {
+    if modern() && (*c).x[30] == CLOCK_CALL {
+        let y = (*c).s(1) + CLOCK_DROP * f32::from_bits(ICON_HEIGHT.load(Ordering::Relaxed));
+        (*c).set_s(1, y);
+    }
+    G_483a98_orig(c);
 }

@@ -379,13 +379,26 @@ Faithful ports, no behaviour change (the handling override factors tried the sam
 - Checked with screenshots: both menu pages, looks and effects in a scripted run, HUD parts hidden. Not tuned on other
   weather types or times of day.
 
-## Modern HUD style (26 Nov 2026)
-- SETTINGS > HUD > STYLE (lcs.ini `hud_style=legacy|modern`, default legacy). Modern is laid out like GTA V: a
-  rectangular, slightly tilted radar bottom-left with health (green) and armour (blue) as two bars under it.
-- Rust (recomp/engine/src/hud.rs): the radar widget is widened by 1.45, radar space is stretched vertically by the same
-  factor (map scale unchanged, the engine's unit-square clip gives the rectangle), blips clamp to the rectangle, the
-  circle mask and ring sprite are skipped, the screen transform narrows the far edge by 12%. The pause map is not changed.
-  The bars are drawn by rt/present.c from the player ped's health (+0x5a0) and armour (+0x5a4) against the maxima.
-  The original health and armour bars are hidden in this style; clock, money and weapon icon stay as in legacy.
-- Checked with screenshots at 1280x720 while walking and riding. Not checked: pause map after switching, other aspect
-  ratios, very high radar sizes, and the new menu row was not captured in a screenshot.
+## Modern HUD style (26 Nov 2026, GTA IV layout)
+- SETTINGS > HUD > STYLE (lcs.ini `hud_style=legacy|modern`, default legacy). It replaces the earlier rectangular
+  GTA V layout. Modern: the round radar bottom-left inside a ring with health on the left half (green) and armour on the
+  right half (blue), both filling from the bottom; the weapon picture without its frame; the clock moved down next to the
+  ammo count, directly above the money.
+- Rust (recomp/engine/src/hud.rs): the ring is drawn with CSprite2d::Draw2DPolygon in place of the radar ring sprite,
+  so map blips stay on top; the weapon picture is drawn cut to the inside of the frame baked into its texture; the clock
+  call is moved down by 0.66 picture heights. `hud_health` / `hud_armour` = 0 hide their half of the ring. The original
+  health and armour bars are hidden in this style. Legacy is unchanged.
+- Checked with screenshots at 1280x720 on foot, with fists and a pistol, health and armour set to partial values by
+  temporary test code. Not checked: other weapon pictures, the pause map, wanted stars, other aspect ratios.
+
+## Tyre grip after a skid: `skid_fix` (26 Nov 2026)
+- Original behaviour (read from the disassembly of 2.4.379): CVehicle::ProcessWheel (cars, mark at G+0x9ca46e) and
+  CVehicle::ProcessBikeWheel (bikes, G+0x9ca475) set a static "this tyre was already skidding" mark when a wheel
+  arrives in a skid state, and nothing clears it. From then on every call starts with grip x the handling record's
+  traction loss (bikes seen in a session: 0.82 and 0.90; other vehicles 0.70 to 0.90), so wheels lock under braking and
+  break loose in corners sooner. A scripted session had both marks set in every report.
+- `skid_fix=1` (lcs.ini or `--set skid_fix 1`, default 0 = original) clears the mark before each call
+  (recomp/engine/src/wheel.rs). Off while verifying. Brake force and grip both scale with the time step, so by the
+  code the lock threshold does not depend on the frame rate.
+- Checked: with the fix on, both marks read 0 through a scripted session on foot among traffic. Not checked: braking
+  distance or feel while riding.

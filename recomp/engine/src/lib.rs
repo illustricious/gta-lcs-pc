@@ -22,6 +22,7 @@ mod pad;
 mod timecycle;
 mod transmission;
 pub mod verify;
+mod wheel;
 
 pub use cpu::Cpu;
 

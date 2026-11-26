@@ -31,8 +31,9 @@ typedef struct Settings {
     float fx[6];         /* sharpen, fxaa, vignette, brightness, contrast, saturation */
     int look;            /* colour preset of the time cycle: 0 original, 1 natural, 2 clear, 3 moody */
     int hud_hidden;      /* bit 0 whole HUD, 1 clock, 2 money, 3 health, 4 armour */
-    int hud_modern;      /* rectangular radar with bars under it */
+    int hud_modern;      /* health and armour ring, frameless weapon, clock above money */
     int touch_controls;  /* draw the Android on-screen controls */
+    int skid_fix;        /* clear the tyre "already skidding" mark before each wheel step */
 } Settings;
 static Settings cfg = {1, 28.0f, 1.0f, 0.0f, 1.0f, 1.0f, .fx = {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f}};
 static char ini_path[600];
@@ -81,7 +82,9 @@ static const char *DEFAULT_INI =
     "fx_brightness=1.0\n"
     "fx_contrast=1.0\n"
     "fx_saturation=1.0\n"
-    "; HUD style: legacy (the game's own) or modern (rectangular radar with health and armour bars under it)\n"
+    "; 1 = tyres get their grip back after a skid (the original keeps it reduced after the first one); 0 = original\n"
+    "skid_fix=0\n"
+    "; HUD style: legacy (the game's own) or modern (GTA IV style: health and armour ring around the radar)\n"
     "hud_style=legacy\n"
     "; HUD parts, 1 = shown: hud (everything, including messages), hud_clock, hud_money, hud_health, hud_armour\n"
     "hud=1\n"
@@ -161,6 +164,7 @@ void tweaks_set(const char *line, const char *val) {
     else if (!strcmp(line, "camera_distance")) cfg.camera_distance = (float)atof(val);
     else if (!strcmp(line, "world_fade")) cfg.world_fade = (float)atof(val);
     else if (!strcmp(line, "touch_controls")) cfg.touch_controls = atoi(val);
+    else if (!strcmp(line, "skid_fix")) cfg.skid_fix = atoi(val);
     else if (!strcmp(line, "draw_distance")) cfg.draw_distance = (float)atof(val);
     else if (!strcmp(line, "res_scale")) cfg.res_scale = (float)atof(val);
     else if (!strcmp(line, "fps_cap")) plat.fps_cap = atoi(val);
@@ -489,6 +493,7 @@ static void vehicle_diag(void) {
         if (d < 400) bin[d < 80 ? 0 : d < 160 ? 1 : 2]++;
     }
     rt_log("diag: vehicles within 80: %d, 80-160: %d, 160-400: %d\n", bin[0], bin[1], bin[2]);
+    rt_log("diag: tyre skid marks car %d bike %d\n", M8(G_BASE + 0x9ca46e), M8(G_BASE + 0x9ca475));
 }
 
 void tweaks_apply(CPU *c) {
@@ -507,6 +512,7 @@ void tweaks_apply(CPU *c) {
             lcs_set_hud(cfg.hud_hidden);
             void lcs_set_hud_style(int modern); lcs_set_hud_style(cfg.hud_modern);
         }
+        { void lcs_set_skid_fix(int on); lcs_set_skid_fix(cfg.skid_fix); }
         { void lcs_set_generation_scale(float s); const char *g = getenv("LCS_GEN"); /* tests: override */
           lcs_set_generation_scale(g ? (float)atof(g) : cfg.draw_distance); }
         if (rt_verbose) vehicle_diag();
